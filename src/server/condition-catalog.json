@@ -1,0 +1,25 @@
+{
+  "names": ["disposition", "platforms", "entity", "operation", "logic", "semantic", "daily", "lifetime", "status", "end", "name", "created", "id", "currency", "platform_meta", "platform_naver", "platform_kakao", "platform_google"],
+  "offsets": [0, 4, 11, 18, 26, 29, 34, 44, 54, 58, 62, 66, 69, 72, 76, 79, 82, 85],
+  "total_classes": 88,
+  "catalog": {
+    "disposition": ["query", "clarification", "unsupported", "unknown"],
+    "platforms": ["meta", "naver", "kakao", "google", "all", "multiple", "unknown"],
+    "entity": ["campaign", "adgroup", "ad", "creative", "keyword", "asset_group", "unknown"],
+    "operation": ["find", "count", "compare", "audit", "history", "policy", "create_rule", "unknown"],
+    "logic": ["AND", "OR", "unknown"],
+    "semantic": ["none", "retarget", "purchase_mismatch", "branding", "unknown"],
+    "daily": ["none", "is_empty", "is_not_empty", "eq", "ne", "gt", "gte", "lt", "lte", "unknown"],
+    "lifetime": ["none", "is_empty", "is_not_empty", "eq", "ne", "gt", "gte", "lt", "lte", "unknown"],
+    "status": ["none", "active", "inactive", "unknown"],
+    "end": ["none", "is_empty", "is_not_empty", "unknown"],
+    "name": ["none", "contains", "not_contains", "unknown"],
+    "created": ["none", "between", "unknown"],
+    "id": ["none", "eq", "unknown"],
+    "currency": ["KRW", "USD", "none", "unknown"],
+    "platform_meta": ["yes", "no", "unknown"],
+    "platform_naver": ["yes", "no", "unknown"],
+    "platform_kakao": ["yes", "no", "unknown"],
+    "platform_google": ["yes", "no", "unknown"]
+  }
+}
