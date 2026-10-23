@@ -7,7 +7,7 @@ import {
   stringify,
   visit,
 } from "yaml";
-import { z } from "zod";
+import { z } from "../../lib/validation";
 import { PLATFORMS } from "../../contracts/domain";
 import { OPERATORS, type Predicate, type Policy } from "../../contracts/policy";
 import { decimal, safeRegex } from "./values";

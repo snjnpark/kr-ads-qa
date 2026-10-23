@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { z } from "zod";
+import { z } from "../lib/validation";
 import type { ChoiceQuestion } from "../browser/model/types";
 import { PLATFORMS } from "./models";
 import { literalProducts, unquotedAdText, queryScopeText } from "../lib/ad-products";

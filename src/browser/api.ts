@@ -1,5 +1,5 @@
 const randomBytes = (size: number) => ({ toString: (_encoding: string) => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(size)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "") });
-import { z } from "zod";
+import { z } from "../lib/validation";
 import { setOperationSignal } from "./operation-context";
 import { BrowserApplication as Application } from "./application";
 import { readSettings, saveSettings } from "./settings";

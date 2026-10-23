@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "./validation";
 export const RULES: Record<string, string> = {
   BUDGET_001: "캠페인·광고그룹 예산 설정",
   BUDGET_002: "일예산 금액",
