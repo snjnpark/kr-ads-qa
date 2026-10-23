@@ -1,7 +1,8 @@
 import type { ChoiceQuestion } from "./types";
 import type { QueryContext } from "../../server/query";
 import { interpretQuery } from "../../server/query-model";
-import { MODEL_RELEASE, type ModelLoadOptions } from "./cache";
+import type { ModelLoadOptions } from "./cache";
+import { MODEL_VERSION } from "./model-version";
 import { createBrowserAgent } from "./inference";
 import type { ModelConfig } from "./types";
 export const INTENTS = {
@@ -178,7 +179,7 @@ export class BrowserModelCore {
     if (!Number.isFinite(this.threshold) || this.threshold < 0 || this.threshold > 1 || !Number.isFinite(this.margin) || this.margin < 0 || this.margin > 1 || !Number.isInteger(this.batchSize) || this.batchSize < 1 || this.batchSize > 256) throw new Error("의미 판단 설정값이 올바르지 않습니다.");
   }
   get source() { return "laya"; }
-  get modelVersion() { return `candidate:${MODEL_RELEASE.candidate_id}@${MODEL_RELEASE.files["candidate-manifest.json"].sha256};onnxruntime-web=1.30.0;wasm;heads=candidate;axes;policy=${SEMANTIC_POLICY_VERSION}`; }
+  get modelVersion() { return MODEL_VERSION; }
   async load(): Promise<TypedAgent> {
     if (this.agent) return this.agent;
     if (!this.loading) this.loading = createBrowserAgent(this.options).then(loaded => {

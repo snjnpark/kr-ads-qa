@@ -1,6 +1,7 @@
 import type { QueryContext } from "../../server/query";
 import { QueryModelError, type interpretQuery } from "../../server/query-model";
 import { MODEL_RELEASE, MODEL_TOTAL_BYTES } from "./cache";
+import { MODEL_VERSION } from "./model-version";
 import type { Decision, SemanticInput, ModelProgress, EngineSettings, WorkerRequest, WorkerResponse } from "./protocol";
 export { semanticIdentity, semanticState, SEMANTIC_POLICY_VERSION, QUESTION_SCHEMA_VERSION } from "./identity";
 export type { Decision, SemanticInput, ModelProgress } from "./protocol";
@@ -30,7 +31,7 @@ export class BrowserLayaEngine {
     if (options.onProgress) this.listeners.add(options.onProgress);
   }
   get source() { return "laya"; }
-  get modelVersion() { return `candidate:${this.candidateId}@${MODEL_RELEASE.files["candidate-manifest.json"].sha256};onnxruntime-web=1.30.0;wasm;heads=candidate;axes;policy=typed-input-order-commercial-conflict-v2`; }
+  get modelVersion() { return MODEL_VERSION; }
   get modelStatus() { return { ...this.progress, ready: this.ready, model_version: this.modelVersion }; }
   subscribe(listener: (value: ModelProgress) => void) { this.listeners.add(listener); listener(this.progress); return () => { this.listeners.delete(listener); }; }
   private emit(progress: ModelProgress) { this.progress = progress; if (progress.stage === "ready") this.ready = true; for (const listener of this.listeners) { try { listener(progress); } catch { /* A view listener must not interrupt inference. */ } } }

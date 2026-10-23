@@ -1,42 +1,54 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "release": {
-    "candidate_id": "conditions-qualifier-v1",
+    "kind": "laya-lora-separated",
+    "candidate_id": "laya-lora-r4-colab-v1",
     "files": {
-      "laya.onnx": {
-        "url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-conditions-v1/laya.onnx",
-        "sha256": "598139f0de4a2306c32a4072fa5286bfdafe826f62f2dcfceecb31520cacac55",
-        "size_bytes": 2589875
+      "lora.onnx": {
+        "url": "/models/laya-lora-r4-colab-v1/lora.onnx",
+        "download_url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-lora-colab-v1/lora.onnx",
+        "sha256": "0829a214f2706f247556c687b44e17fae8fd454459f82abcd1e5ff9b1e9bdf8c",
+        "size_bytes": 7618022,
+        "source": "application"
       },
-      "laya_config.json": {
-        "url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-conditions-v1/laya_config.json",
-        "sha256": "ee17d125f8504bcabcdf26041b2401805797b3be79ae3d2589aaffc60c7d6fa6",
-        "size_bytes": 167
-      },
-      "tokenizer/tokenizer.json": {
-        "url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-conditions-v1/tokenizer--tokenizer.json",
-        "sha256": "bcdb37f36380b253cd7f5162c1f8d8e7b1363681afb052be4b42ae279e8c50c6",
-        "size_bytes": 13718896
-      },
-      "tokenizer/tokenizer_config.json": {
-        "url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-conditions-v1/tokenizer--tokenizer_config.json",
-        "sha256": "6c6b2d8e3c84ce0e671c129cd6b374b235d6f9863042a5836358d00a89bbb5a1",
-        "size_bytes": 524
-      },
-      "model.onnx.data": {
-        "url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-conditions-v1/model.onnx.data",
-        "sha256": "62a9fc1ed1ed8efba327dd2402fd405ece5d12abebc13705dca994081a86ce4e",
-        "size_bytes": 1310195712
+      "adapter-heads.bin": {
+        "url": "/models/laya-lora-r4-colab-v1/adapter-heads.bin",
+        "download_url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-lora-colab-v1/adapter-heads.bin",
+        "sha256": "ab9aedb396b4748890613fd4a4d9fc07488a530167c8a690d397a5561d02a955",
+        "size_bytes": 60958720,
+        "source": "application"
       },
       "condition-head.onnx": {
-        "url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-conditions-v1/condition-head.onnx",
-        "sha256": "ca73bd6b1184275c8b50b377b85327df05a67c961e2a8b6e974dfcd155129165",
-        "size_bytes": 21790784
+        "url": "/models/laya-lora-r4-colab-v1/condition-head.onnx",
+        "download_url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-lora-colab-v1/condition-head.onnx",
+        "sha256": "ae277e2fc52dcbdf4ef015a7b82161d3ca1d4ef03668ff5aef5532fde2e26732",
+        "size_bytes": 21764276,
+        "source": "application"
       },
-      "candidate-manifest.json": {
-        "url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-conditions-v1/candidate-manifest.json",
-        "sha256": "f1fd484e5852400524ceb55349799be66c6a71eea9499b13ef2d3a102c30d9ef",
-        "size_bytes": 1057
+      "laya_config.json": {
+        "url": "/models/laya-lora-r4-colab-v1/laya_config.json",
+        "download_url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-lora-colab-v1/laya_config.json",
+        "sha256": "7c16e9215ddf49c4918dc2af178ca5bc751047f2e44586f8b4e55231dcb505b1",
+        "size_bytes": 142,
+        "source": "application"
+      },
+      "upstream.safetensors": {
+        "url": "https://huggingface.co/convaiinnovations/laya/resolve/7b928d828b7b0e022f929d9bd2e44165aa270148/multilingual/model.safetensors",
+        "sha256": "9d628fd971b700382ac6f65920a86f149777b2e748e0c955fb3b19695aa8f204",
+        "size_bytes": 643835514,
+        "source": "upstream"
+      },
+      "tokenizer/tokenizer.json": {
+        "url": "https://huggingface.co/convaiinnovations/laya/resolve/7b928d828b7b0e022f929d9bd2e44165aa270148/multilingual/tokenizer/tokenizer.json",
+        "sha256": "609d8f4c067cd3950f88594c5a802616cea245823836ef5848ee4fc40aab5b6f",
+        "size_bytes": 34363188,
+        "source": "upstream"
+      },
+      "tokenizer/tokenizer_config.json": {
+        "url": "https://huggingface.co/convaiinnovations/laya/resolve/7b928d828b7b0e022f929d9bd2e44165aa270148/multilingual/tokenizer/tokenizer_config.json",
+        "sha256": "6c6b2d8e3c84ce0e671c129cd6b374b235d6f9863042a5836358d00a89bbb5a1",
+        "size_bytes": 524,
+        "source": "upstream"
       }
     }
   }
