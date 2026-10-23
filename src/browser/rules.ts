@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
+import { sha256 } from "./crypto";
 import Decimal from "decimal.js";
 import { DateTime } from "luxon";
 import { stringify } from "yaml";
 import type { Policy, Rule } from "../contracts/policy";
-import { loadPolicy } from "./policies/schema";
-import { PolicyManager } from "./policies/repository";
+import { loadPolicy } from "../server/policies/schema";
+import { BrowserPolicyManager as PolicyManager } from "./policies";
 
 export type Classification = {
   source?: string;
@@ -40,10 +40,8 @@ export function canonicalJson(value: unknown): string {
   }
   return JSON.stringify(sorted(value));
 }
-function digest(text: string, policyId: string, rule: Rule): string {
-  return createHash("sha256")
-    .update(canonicalJson({ text, policy_id: policyId, rule }))
-    .digest("hex");
+async function digest(text: string, policyId: string, rule: Rule): Promise<string> {
+  return sha256(canonicalJson({ text, policy_id: policyId, rule }));
 }
 function money(text: string): string {
   const match = text.match(/(\d[\d,]*(?:\.\d+)?)\s*(억|만|천)?\s*원?/);
@@ -198,7 +196,7 @@ export class RuleBuilder {
       throw new Error(
         "지원하는 조건: 일예산 상한, 운영 상태, 이름 조건의 종료일, 승인된 맞춤 타겟 존재 검사입니다.",
       );
-    const ruleId = `CUSTOM_${createHash("sha256").update(text).digest("hex").slice(0, 12).toUpperCase()}`;
+    const ruleId = `CUSTOM_${(await sha256(text)).slice(0, 12).toUpperCase()}`;
     const rule = loadPolicy({
       policy_id: policyId,
       name: "규칙 미리보기",
@@ -220,17 +218,17 @@ export class RuleBuilder {
       policy_id: policyId,
       rule,
       yaml,
-      digest: digest(text, policyId, rule),
+      digest: await digest(text, policyId, rule),
       notes,
       classification,
     };
   }
 
-  save(draft: RuleDraft, approved = false, approvedHash?: string): Policy {
+  async save(draft: RuleDraft, approved = false, approvedHash?: string): Promise<Policy> {
     if (approved !== true || approvedHash !== draft.digest)
       throw new Error("미리보기의 정확한 규칙을 승인한 뒤 저장할 수 있습니다.");
     if (
-      digest(draft.text, draft.policy_id, draft.rule) !== draft.digest ||
+      (await digest(draft.text, draft.policy_id, draft.rule)) !== draft.digest ||
       stringify(draft.rule) !== draft.yaml
     )
       throw new Error(

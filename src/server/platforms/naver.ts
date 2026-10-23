@@ -1,4 +1,3 @@
-import { createHmac } from "node:crypto";
 import {
   createEntity,
   type Entity,
@@ -59,15 +58,20 @@ function creativeParts(value: unknown, path = "ad", depth = 0): { text: string[]
   return result;
 }
 
-export function generateSignature(
+export async function generateSignature(
   stamp: string,
   method: string,
   uri: string,
   secret: string,
 ) {
-  return createHmac("sha256", secret)
-    .update(`${stamp}.${method.toUpperCase()}.${uri}`)
-    .digest("base64");
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  const bytes = new Uint8Array(await crypto.subtle.sign(
+    "HMAC", key, encoder.encode(`${stamp}.${method.toUpperCase()}.${uri}`),
+  ));
+  return btoa(String.fromCharCode(...bytes));
 }
 export class NaverAdapter extends BaseAdapter {
   platform = "naver" as const;
@@ -155,7 +159,7 @@ export class NaverAdapter extends BaseAdapter {
         "X-Timestamp": stamp,
         "X-API-KEY": this.apiKey,
         "X-Customer": safeId(accountId),
-        "X-Signature": generateSignature(stamp, "GET", path, this.secretKey),
+        "X-Signature": await generateSignature(stamp, "GET", path, this.secretKey),
       },
     });
   }

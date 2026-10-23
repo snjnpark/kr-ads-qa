@@ -1,0 +1,31 @@
+{
+  "policy_id": "default",
+  "name": "기본 점검 정책",
+  "version": 1,
+  "platforms": [
+    "meta",
+    "naver",
+    "kakao",
+    "google"
+  ],
+  "account_ids": [],
+  "settings": {},
+  "rules": [
+    {
+      "rule_id": "PROMOTION_END_REVIEW",
+      "name": "프로모션 종료일 확인",
+      "entity": "campaign",
+      "severity": "review",
+      "enabled": true,
+      "when": {
+        "field": "name",
+        "operator": "contains",
+        "value": "프로모션"
+      },
+      "check": {
+        "field": "schedule.end",
+        "operator": "is_not_empty"
+      }
+    }
+  ]
+}

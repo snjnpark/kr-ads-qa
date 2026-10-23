@@ -25,6 +25,12 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@test-support": [
+        "./src/server/test-support-disabled.ts"
+      ],
+      "@browser-runtime": [
+        "./src/browser/runtime-factory.ts"
       ]
     }
   },
@@ -39,6 +45,20 @@
   "exclude": [
     "node_modules",
     "data",
-    "output"
+    "output",
+    "src/server/api.ts",
+    "src/server/application.ts",
+    "src/server/application/settings.ts",
+    "src/server/application/query.ts",
+    "src/server/ai.ts",
+    "src/server/credentials.ts",
+    "src/server/storage.ts",
+    "src/server/rules.ts",
+    "src/server/policies/repository.ts",
+    "src/server/platforms/index.ts",
+    "src/server/laya-bundle.ts",
+    "src/server/model-release.ts",
+    "src/server/condition-classifier.ts",
+    "src/server/test-support-disabled.ts"
   ]
 }

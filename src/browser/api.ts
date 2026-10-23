@@ -1,21 +1,20 @@
-import { TEST_MODE } from "../lib/runtime";
-import { LEGACY_DATASET_NAMES } from "../lib/settings-compatibility";
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import { existsSync } from "node:fs";
+const randomBytes = (size: number) => ({ toString: (_encoding: string) => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(size)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "") });
 import { z } from "zod";
-import { Application } from "./application";
-import { readSettings, saveSettings, SETTINGS_FILE } from "./application/settings";
-import { validateScope } from "./application/scope";
+import { setOperationSignal } from "./operation-context";
+import { BrowserApplication as Application } from "./application";
+import { readSettings, saveSettings } from "./settings";
+import { validateScope } from "../server/application/scope";
 import { NAMES, saveCredentials } from "./credentials";
-import { queryNativeHistory } from "./history";
-import { PLATFORMS, type Json, type Settings } from "./models";
-import { loadPolicy, policyYaml, type Policy } from "./policies";
+import { queryNativeHistory } from "../server/history";
+import { PLATFORMS, type Json, type Settings } from "../server/models";
+import { loadPolicy, policyYaml } from "../server/policies/schema";
+import type { Policy } from "../contracts/policy";
 import { auditRulesSchema } from "../lib/audit-rules";
-import { emptyContext, type QueryContext } from "./query";
+import { emptyContext, type QueryContext } from "../server/query";
 import { RuleBuilder, type RuleDraft } from "./rules";
 
 export const MAX_BODY_BYTES = 2_000_000;
-const COOKIE_NAME = TEST_MODE ? "laya_test_session" : "laya_session";
+const COOKIE_NAME = "laya_browser_session";
 const SESSION_TTL = 12 * 60 * 60 * 1000;
 type TabSession = {
   context: QueryContext;
@@ -84,51 +83,13 @@ export function publicData(value: unknown): unknown {
 function json(value: unknown, status = 200): Response {
   return Response.json(publicData(value), { status });
 }
-function allowedHost(host: string): boolean {
-  return ["localhost", "127.0.0.1", "[::1]", "::1"].includes(
-    host.toLowerCase(),
-  );
-}
-function validateRequestOrigin(request: Request): void {
-  const url = new URL(request.url);
-  if (!["http:", "https:"].includes(url.protocol) || !allowedHost(url.hostname))
-    throw new ApiError(403, "이 앱은 로컬 PC에서만 사용할 수 있습니다.");
-  const host = request.headers.get("host");
-  let publicOrigin = url.origin;
-  if (host) {
-    if (/[\s/@\\?#]/.test(host))
-      throw new ApiError(403, "접속 주소를 확인해 주세요.");
-    let external: URL;
-    try {
-      external = new URL(`${url.protocol}//${host}`);
-    } catch {
-      throw new ApiError(403, "접속 주소를 확인해 주세요.");
-    }
-    if (!allowedHost(external.hostname) || external.port !== url.port)
-      throw new ApiError(403, "접속 주소를 확인해 주세요.");
-    // Next.js may canonicalize the internal URL to localhost; the validated Host is the browser origin.
-    publicOrigin = external.origin;
-  }
-  if (request.headers.get("sec-fetch-site") === "cross-site")
-    throw new ApiError(403, "앱 화면에서 다시 시도해 주세요.");
-  const origin = request.headers.get("origin");
-  if (origin) {
-    try {
-      if (new URL(origin).origin !== publicOrigin) throw new Error();
-    } catch {
-      throw new ApiError(403, "앱 화면에서 다시 시도해 주세요.");
-    }
-  }
-  if (!["GET", "HEAD"].includes(request.method) && !origin)
-    throw new ApiError(403, "앱 화면에서 다시 시도해 주세요.");
-}
-function equalToken(first: string | null, second: string): boolean {
-  if (!first) return false;
-  const left = Buffer.from(first),
-    right = Buffer.from(second);
-  return left.byteLength === right.byteLength && timingSafeEqual(left, right);
-}
+function validateRequestOrigin(_request: Request): void { /* Local Worker RPC only; no HTTP listener. */ }
+function equalToken(first: string | null, second: string): boolean { return first !== null && first === second; }
 function cookieValue(request: Request): string | null {
+  // Browser Request strips Cookie. This handler runs only inside the tab Worker;
+  // use a local RPC header, never an HTTP authentication mechanism.
+  const localSession = request.headers.get("x-laya-worker-session");
+  if (localSession) return localSession;
   for (const part of (request.headers.get("cookie") ?? "").split(";")) {
     const [name, ...value] = part.trim().split("=");
     if (name === COOKIE_NAME) return value.join("=");
@@ -147,6 +108,8 @@ function headers(
     "Content-Security-Policy",
     "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
   );
+  if (cookie)
+    response.headers.set("X-Laya-Worker-Session", cookie);
   if (cookie)
     response.headers.append(
       "Set-Cookie",
@@ -192,7 +155,8 @@ async function readBody(request: Request): Promise<Record<string, unknown>> {
   }
   if (!length) return {};
   try {
-    const source = Buffer.concat(parts);
+    const source = new Uint8Array(length);
+    let offset = 0; for (const part of parts) { source.set(part, offset); offset += part.length; }
     const data = JSON.parse(
       new TextDecoder("utf-8", { fatal: true }).decode(source),
     );
@@ -226,9 +190,9 @@ const syncSchema = z.strictObject({
 const policyText = z.strictObject({ yaml: z.string().min(1).max(1_000_000) });
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const settingsSchema = z.strictObject({
-  mode: (TEST_MODE ? z.enum(["mock", "live"]) : z.literal("live")).optional(),
-  ai_mode: (TEST_MODE ? z.enum(["mock", "laya"]) : z.literal("laya")).optional(),
-  mock_dataset: (TEST_MODE ? z.enum(LEGACY_DATASET_NAMES) : z.never()).optional(),
+  mode: z.literal("live").optional(),
+  ai_mode: z.literal("laya").optional(),
+  mock_dataset: z.never().optional(),
   cache_ttl_seconds: z.number().int().min(0).max(86400).optional(),
   batch_size: z.number().int().min(1).max(256).optional(),
   semantic_threshold: z.number().min(0.5).max(1).optional(),
@@ -359,7 +323,12 @@ export function createApi(
       const method = request.method === "HEAD" ? "GET" : request.method;
       const body = method === "GET" ? {} : await readBody(request);
       const service = await app();
+      const activeTab = tab;
       const response = await service.mutex.run(async () => {
+        const previousContext = structuredClone(activeTab.context), previousDraft = structuredClone(activeTab.draft);
+        try { const result = await service.storage.atomic(async () => {
+        setOperationSignal(request.signal);
+        if (service.hydratedRevision !== service.storage.revision) await service.initialize();
         if (method === "GET" && path === "/state") {
           const scope = validateScope(
             parsed(scopeSchema, {
@@ -537,7 +506,7 @@ export function createApi(
             body,
           );
           return json(
-            service.compareHistory(
+            await service.compareHistory(
               input.before_id,
               input.after_id,
               validateScope(input),
@@ -611,7 +580,7 @@ export function createApi(
               "먼저 이 화면에서 규칙 미리보기를 생성해 주세요.",
             );
           if (path === "/rules/approve") {
-            const saved = new RuleBuilder(service.policies).save(
+            const saved = await new RuleBuilder(service.policies).save(
               tab.draft,
               true,
               input.digest,
@@ -635,7 +604,7 @@ export function createApi(
                 name: "규칙 검증",
                 rules: [draft.rule],
               });
-          const { customRuleResults } = await import("./policies");
+          const { customRuleResults } = await import("../server/policies");
           const selected = service.entities.filter(
             (entity) =>
               (!scope.platforms?.length ||
@@ -661,11 +630,7 @@ export function createApi(
           });
         }
         if (method === "GET" && path === "/settings") {
-          const pending = options.settingsReader
-            ? options.settingsReader()
-            : existsSync(SETTINGS_FILE)
-              ? readSettings()
-              : service.settings;
+          const pending = options.settingsReader ? options.settingsReader() : readSettings();
           return json({
             settings: pending,
             active_settings: service.settings,
@@ -722,7 +687,7 @@ export function createApi(
           }
           return json({
             message:
-              "인증 정보를 저장했습니다. 앱을 다시 실행해 연결을 확인해 주세요.",
+              "인증 정보는 이 탭의 메모리에만 보관합니다. 데이터를 새로고침해 연결을 확인하세요.",
           });
         }
         if (method === "POST" && path === "/export") {
@@ -740,6 +705,15 @@ export function createApi(
           });
         }
         throw new ApiError(404, "요청한 기능을 찾을 수 없습니다.");
+      }, { signal: request.signal });
+          service.hydratedRevision = service.storage.revision;
+          return result;
+        } catch (error) {
+          activeTab.context = previousContext; activeTab.draft = previousDraft;
+          await service.storage.reload();
+          await service.initialize();
+          throw error;
+        } finally { setOperationSignal(); }
       });
       return headers(response, request, fresh);
     } catch (error) {
@@ -772,34 +746,4 @@ export function createApi(
       );
     }
   };
-}
-
-type SharedApi = typeof globalThis & {
-  __layaApplication?: Promise<Application>;
-  __layaApi?: ReturnType<typeof createApi>;
-  __layaApiFactory?: typeof createApi;
-};
-export function getApplication(): Promise<Application> {
-  const shared = globalThis as SharedApi;
-  if (!shared.__layaApplication)
-    shared.__layaApplication = (async () => {
-      const application = new Application(readSettings());
-      try {
-        await application.initialize();
-        return application;
-      } catch (error) {
-        await application.close().catch(() => undefined);
-        delete shared.__layaApplication;
-        throw error;
-      }
-    })();
-  return shared.__layaApplication;
-}
-export function handleApiRequest(request: Request): Promise<Response> {
-  const shared = globalThis as SharedApi;
-  if (!shared.__layaApi || shared.__layaApiFactory !== createApi) {
-    shared.__layaApi = createApi(getApplication);
-    shared.__layaApiFactory = createApi;
-  }
-  return shared.__layaApi(request);
 }

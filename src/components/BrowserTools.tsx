@@ -1,0 +1,56 @@
+"use client";
+import { useEffect, useState } from "react";
+import { browserCall } from "../browser/client";
+import { Button } from "./ui/button";
+
+type Status = { stage: string; loaded: number; total: number; ready: boolean; message?: string };
+export function BrowserModelTools() {
+  const [status, setStatus] = useState<Status>();
+  const [message, setMessage] = useState("");
+  const refresh = () => browserCall<Status>("/model/status").then(setStatus).catch(error => setMessage(error.message));
+  useEffect(() => { void refresh(); const timer = setInterval(() => void refresh(), 1000); return () => clearInterval(timer); }, []);
+  const command = async (path: string, body?: unknown) => {
+    try { const result = await browserCall<{ message: string }>(path, { method: "POST", body }); setMessage(result.message); void refresh(); }
+    catch (error) { setMessage((error as Error).message); }
+  };
+  return <div className="settings-model-info" aria-label="브라우저 모델 준비">
+    <h3>이 브라우저에서 모델 실행</h3>
+    <p>최초 준비에는 약 1.35GB의 공개 모델 파일이 필요합니다. 모델과 질문 해석은 사용자 기기에서 실행되며, 질문·광고 데이터는 모델 서버로 전송하지 않습니다.</p>
+    <p role="status">{status?.message ?? (status?.ready ? "모델 준비 완료" : "모델 준비가 필요합니다.")}</p>
+    {status && status.loaded > 0 && <progress aria-label="모델 준비 진행률" value={status.loaded} max={status.total} className="w-full" />}
+    <div className="flex flex-wrap gap-2">
+      <Button type="button" variant="outline" onClick={() => void command("/model/load")}>모델 준비</Button>
+      <Button type="button" variant="outline" onClick={() => void command("/model/cancel")}>중단</Button>
+      <Button type="button" variant="outline" onClick={() => void command("/model/retry")}>다시 시도</Button>
+    </div>
+    <details className="mt-3"><summary>모델 파일 가져오기</summary>
+      <p>자동 받기를 사용할 수 없다면 <a href="https://github.com/snjnpark/kr-ads-qa-models/releases/tag/model-conditions-v1" target="_blank" rel="noreferrer">배포 모델 파일 7개</a>를 받은 뒤 함께 선택하세요. 파일의 버전과 무결성을 확인해 이 브라우저에 보관합니다.</p>
+      <input aria-label="모델 파일 선택" type="file" multiple onChange={event => { const files = Array.from(event.target.files ?? []); if (files.length) void command("/model/import", { files }); event.target.value = ""; }} />
+    </details>
+    {message && <p role="status">{message}</p>}
+  </div>;
+}
+
+export function BrowserBackupTools() {
+  const [message, setMessage] = useState("");
+  async function save() {
+    try {
+      const { content } = await browserCall<{ content: string }>("/backup/export");
+      const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
+      const link = document.createElement("a"); link.href = url; link.download = `광고_QA_백업_${new Date().toISOString().slice(0,10)}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setMessage("백업을 만들었습니다. API 인증 정보는 포함되지 않습니다.");
+    } catch (error) { setMessage((error as Error).message); }
+  }
+  async function restore(file: File) {
+    if (file.size > 100 * 1024 * 1024) { setMessage("백업 파일은 100MB 이하여야 합니다."); return; }
+    if (!window.confirm("현재 브라우저의 저장 데이터를 백업 내용으로 바꿀까요? 먼저 현재 자료를 백업해 주세요.")) return;
+    try { const result = await browserCall<{ message: string }>("/backup/import", { method: "POST", body: { content: await file.text() } }); setMessage(result.message); }
+    catch (error) { setMessage((error as Error).message); }
+  }
+  return <div className="settings-maintenance" aria-label="브라우저 데이터 백업">
+    <div><h3>브라우저 데이터 백업</h3><p>정책·조회 자료·검사·이력은 현재 브라우저 주소별로 저장됩니다. 브라우저 자료를 지우거나 다른 주소로 이동하기 전에 백업하세요. 인증 정보는 포함하지 않습니다.</p></div>
+    <Button type="button" variant="outline" onClick={() => void save()}>백업 다운로드</Button>
+    <label>백업 복원 <input aria-label="백업 파일 선택" type="file" accept="application/json,.json" onChange={event => { const file = event.target.files?.[0]; if (file) void restore(file); event.target.value = ""; }} /></label>
+    {message && <p role="status">{message}</p>}
+  </div>;
+}

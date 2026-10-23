@@ -1,49 +1,45 @@
-import { executeApplicationQuery, type QueryResponse } from "./application/query";
-export { actualConfiguration, type QueryResponse } from "./application/query";
-import { createHash, randomUUID } from "node:crypto";
-import {
-  existsSync,
-  readFileSync,
-} from "node:fs";
-import { resolve } from "node:path";
+import { executeApplicationQuery, type QueryResponse } from "./query";
+export { actualConfiguration, type QueryResponse } from "./query";
+import { sha256 } from "./crypto";
+const randomUUID = () => crypto.randomUUID();
 import {
   createCoverage,
+  createEntity,
   type Account,
   type Entity,
   type Json,
   type Settings,
-} from "./models";
-import { Storage } from "./storage";
-import { loadConnections } from "./credentials";
+} from "../server/models";
+import { BrowserStorage as Storage } from "./storage";
+
 import {
-  getAdapters,
   asPlatformError,
+  PlatformError,
   type AdsPlatformAdapter,
-} from "./platforms";
-import { LayaEngine } from "./ai";
+} from "../server/platforms/base";
+import { BrowserLayaEngine as LayaEngine } from "./model/engine";
 import {
-  PolicyManager,
-} from "./policies/repository";
-import { resolveParent } from "./policies/evaluation";
-import { loadPolicy } from "./policies/schema";
-import { QAEngine, RULES } from "./qa";
-import { PRODUCT_RULES } from "./product-qa";
-import { SnapshotManager, compareSnapshots } from "./history";
+  BrowserPolicyManager as PolicyManager,
+} from "./policies";
+import { resolveParent } from "../server/policies/evaluation";
+import { QAEngine, RULES } from "../server/qa";
+import { PRODUCT_RULES } from "../server/product-qa";
+import { SnapshotManager, compareSnapshots } from "../server/history";
 import {
   emptyContext,
   type QueryContext,
-} from "./query";
-import { TEST_MODE } from "../lib/runtime";
+} from "../server/query";
+
 import { enabledAuditRuleIds } from "../lib/audit-rules";
-import { FrequencyAnomalyDetector } from "./anomaly";
+import { FrequencyAnomalyDetector } from "../server/anomaly";
 import { productCode, productLabel } from "../lib/ad-products";
 
 export type { Scope } from "../contracts/domain";
 import type { Scope } from "../contracts/domain";
-export { SETTINGS_FILE, validateSettings, readSettings, saveSettings } from "./application/settings";
-import { validateSettings } from "./application/settings";
-export { validateScope } from "./application/scope";
-import { selected, scopeKey } from "./application/scope";
+
+import { validateSettings } from "./settings";
+export { validateScope } from "../server/application/scope";
+import { selected, scopeKey } from "../server/application/scope";
 export class Mutex {
   private tail: Promise<unknown> = Promise.resolve();
   run<T>(operation: () => Promise<T> | T): Promise<T> {
@@ -52,7 +48,7 @@ export class Mutex {
     return next;
   }
 }
-export class Application {
+export class BrowserApplication {
   readonly storage: Storage;
   readonly policies: PolicyManager;
   readonly snapshots: SnapshotManager;
@@ -64,12 +60,15 @@ export class Application {
   catalog = new Map<string, Account>();
   coverage = createCoverage();
   lastSync: string | null = null;
+  hydratedRevision = -1;
   source = "";
   private scope = "";
   private loadedScope: Scope = {};
   private timer?: ReturnType<typeof setInterval>;
+  private schedulerPending = false;
   private closing = false;
   private closePromise?: Promise<void>;
+  schedulerError = "";
   constructor(
     readonly settings: Settings,
     options: {
@@ -79,68 +78,48 @@ export class Application {
     } = {},
   ) {
     validateSettings(settings);
-    const policiesExisted = existsSync(settings.policy_directory);
-    this.storage = options.storage ?? new Storage(settings.database);
-    this.policies = new PolicyManager(settings.policy_directory);
-    if (!policiesExisted) {
-      const defaultPolicy = resolve("policies/default.yaml");
-      this.policies.create(
-        loadPolicy(
-          existsSync(defaultPolicy)
-            ? readFileSync(defaultPolicy, "utf8")
-            : { policy_id: "default", name: "기본 정책" },
-        ),
-      );
-    }
+    if (!options.storage) throw new Error("브라우저 저장소를 먼저 열어 주세요.");
+    this.storage = options.storage;
+    this.policies = new PolicyManager(this.storage);
     this.snapshots = new SnapshotManager(this.storage);
     this.adapters = options.adapters ?? {};
-    this.ai =
-      options.ai ??
-      new LayaEngine({
-        mock: settings.ai_mode === "mock",
-        threshold: settings.semantic_threshold,
-        batchSize: settings.batch_size,
-        cpuThreads: settings.cpu_threads,
-        modelDirectory: settings.onnx_directory,
-        ...(TEST_MODE && process.env.LAYA_CANDIDATE_ID && settings.ai_mode !== "mock"
-          ? { modelKind: "candidate" as const, candidateId: process.env.LAYA_CANDIDATE_ID }
-          : {}),
-      });
-    if (!this.ai.mock && this.ai.candidateId)
-      this.settings = { ...settings, onnx_directory: this.ai.modelDirectory };
+    if (!options.ai) throw new Error("브라우저 모델 실행기가 필요합니다.");
+    this.ai = options.ai;
   }
   async initialize() {
-    if (!Object.keys(this.adapters).length)
-      this.adapters =
-        this.settings.mode === "mock"
-          ? getAdapters(this.settings)
-          : getAdapters(this.settings, await loadConnections());
-    if (this.settings.preload_model || (!this.ai.mock && !!this.ai.candidateId && Object.keys(this.adapters).length > 0)) await this.ai.load();
-    await this.sync();
-    if (this.settings.snapshot_interval_seconds > 0) {
-      this.timer = setInterval(() => {
-        if (this.closing) return;
-        void this.mutex.run(async () => {
-          if (this.closing) return;
-          try {
-            await this.sync({}, true);
-            this.saveSnapshot();
-          } catch {
-            try {
-              this.storage.put("change_events", randomUUID(), {
-                source: "local_scheduler",
-                status: "UNKNOWN",
-                at: new Date().toISOString(),
-                reason: "자동 스냅샷을 저장하지 못했습니다.",
-              });
-            } catch {
-              console.error("자동 스냅샷의 오류 기록을 저장하지 못했습니다.");
-            }
-          }
-        });
-      }, this.settings.snapshot_interval_seconds * 1000);
-      this.timer.unref();
+    this.hydratedRevision = this.storage.revision;
+    this.catalog.clear(); this.entities = []; this.accounts = []; this.coverage = createCoverage(); this.lastSync = null;
+    for (const account of this.storage.list<Account>("ad_accounts")) this.catalog.set(`${account.platform}/${account.account_id}`, account);
+    const saved = this.storage.get<Json>("collections", "active");
+    if (saved && Array.isArray(saved.entities)) {
+      this.entities = saved.entities;
+      this.accounts = Array.isArray(saved.accounts) ? saved.accounts : [];
+      this.coverage = saved.coverage ?? createCoverage();
+      this.lastSync = saved.last_sync ?? null;
+      this.loadedScope = saved.scope ?? {};
+      this.scope = scopeKey(this.loadedScope);
+      this.source = "이 브라우저의 저장 데이터";
     }
+  }
+  startScheduler() {
+    if (this.timer || this.settings.snapshot_interval_seconds <= 0) return;
+    this.timer = setInterval(() => {
+      if (this.closing || this.schedulerPending || !Object.keys(this.adapters).length) return;
+      this.schedulerPending = true;
+      void this.mutex.run(async () => {
+        if (this.closing || !Object.keys(this.adapters).length) return;
+        try {
+          await this.storage.atomic(async () => {
+            if (this.hydratedRevision !== this.storage.revision) await this.initialize();
+            await this.sync(this.loadedScope, true); this.saveSnapshot();
+          });
+          this.hydratedRevision = this.storage.revision; this.schedulerError = "";
+        } catch {
+          this.schedulerError = "자동 저장을 완료하지 못했습니다. 저장 공간과 탭 충돌을 확인해 주세요.";
+          await this.storage.reload(); await this.initialize();
+        }
+      }).catch(() => undefined).finally(() => { this.schedulerPending = false; });
+    }, this.settings.snapshot_interval_seconds * 1000);
   }
   async close() {
     if (!this.closePromise) {
@@ -173,11 +152,26 @@ export class Application {
     const adapters = Object.entries(this.adapters).filter(
       ([p]) => !scope.platforms?.length || scope.platforms.includes(p),
     );
+    if (!adapters.length) {
+      // A new tab has no credentials; saved collections remain available offline.
+      const active = this.storage.get<Json>("collections", "active");
+      if (active && Array.isArray(active.entities)) {
+        this.entities = active.entities.filter((entity: Entity) => selected(entity, scope));
+        this.accounts = (active.accounts ?? []).filter((account: Account) => selected(account, scope));
+        this.coverage = { ...active.coverage, complete: false, errors: ["저장된 자료입니다. 이 탭에서 API를 연결하면 최신 데이터를 받을 수 있습니다."] };
+        this.lastSync = active.last_sync ?? null;
+      }
+      this.source = "이 브라우저의 저장 데이터 · API 재연결 필요";
+      return this.entities;
+    }
     await Promise.all(
       adapters.map(async ([platform, adapter]) => {
         let found: Account[] = [];
         try {
           found = await adapter.listAccounts();
+          const ids = new Set<string>();
+          if (found.some(account => account.platform !== platform || !account.account_id || ids.has(account.account_id) || !ids.add(account.account_id)))
+            throw new PlatformError("INVALID_RESPONSE", "광고 계정의 출처와 중복을 확인하지 못했습니다.");
         } catch (error) {
           const cause = asPlatformError(error);
           found = cause.partial_accounts.length
@@ -185,12 +179,17 @@ export class Application {
             : cause.partial_entities.filter((e) => e.entity_type === "account");
           fail(`${platform}: 계정 목록 일부 조회 실패 (${cause.kind})`);
         }
+        const validAccountIds = new Set<string>();
+        found = found.filter(account => {
+          if (!account || account.platform !== platform || typeof account.account_id !== "string" || !account.account_id || validAccountIds.has(account.account_id)) { fail(`${platform}: 계정 출처 또는 중복 오류`); return false; }
+          validAccountIds.add(account.account_id); return true;
+        });
         for (const account of found) {
           this.catalog.set(`${platform}/${account.account_id}`, account);
           if (!selected(account, scope)) continue;
           accounts.push(account);
           this.storage.put("ad_accounts", account.key, account);
-          const key = `${this.settings.mode}/${this.settings.mock_dataset}/${platform}/${account.account_id}`,
+          const key = `${platform}/${account.account_id}`,
             cache = force
               ? null
               : this.storage.cacheGet(key, this.settings.cache_ttl_seconds);
@@ -200,13 +199,29 @@ export class Application {
             continue;
           }
           try {
-            const fetched = await adapter.listEntities(account.account_id);
+            const fetched = (await adapter.listEntities(account.account_id)).map(createEntity);
+            const keys = new Set<string>();
+            for (const entity of fetched) {
+              if (entity.platform !== platform || entity.account_id !== account.account_id || keys.has(entity.key))
+                throw new PlatformError("INVALID_RESPONSE", "광고 설정의 출처와 중복을 확인하지 못했습니다.");
+              keys.add(entity.key);
+            }
             entities.push(...fetched);
             this.storage.cachePut(key, fetched);
             cached.push(false);
           } catch (error) {
             const cause = asPlatformError(error);
-            entities.push(...cause.partial_entities);
+            const partialKeys = new Set<string>();
+            const partial: Entity[] = [];
+            for (const raw of cause.partial_entities) {
+              try {
+                const entity = createEntity(raw);
+                if (entity.platform !== platform || entity.account_id !== account.account_id || partialKeys.has(entity.key)) continue;
+                partialKeys.add(entity.key); partial.push(entity);
+              } catch { /* Invalid partial records are never published or persisted. */ }
+            }
+            entities.push(...partial);
+            this.storage.cachePutPartial(key, partial, ["일부 광고 설정을 조회하지 못했습니다."], scope);
             fail(
               `${platform}/${account.account_id}: 일부 설정 조회 실패 (${cause.kind})`,
             );
@@ -245,16 +260,15 @@ export class Application {
     this.scope = scopeKey(scope);
     this.loadedScope = structuredClone(scope);
     this.lastSync = new Date().toISOString();
-    this.source =
-      cached.length && cached.every(Boolean)
-        ? "캐시"
-        : this.settings.mode === "mock"
-          ? this.settings.mock_dataset === "products"
-            ? "전체 상품 규격 더미"
-            : this.settings.mock_dataset === "api"
-            ? "API 규격 더미"
-            : "샘플 데이터"
-          : "광고 API";
+    this.source = cached.length && cached.every(Boolean) ? "이 브라우저의 캐시" : "광고 API";
+    // Incomplete collection remains visible but does not replace the last complete generation.
+    if (coverage.complete) this.storage.put("collections", "active", {
+      complete: true, entities: this.entities, accounts: this.accounts, coverage, last_sync: this.lastSync, scope: this.loadedScope,
+    });
+    if (!coverage.complete) this.storage.put("collection_attempts", randomUUID(), {
+      complete: false, entities: this.entities, accounts: this.accounts, coverage,
+      at: this.lastSync, scope: this.loadedScope,
+    });
     return this.entities;
   }
   async ensureScope(scope: Scope) {
@@ -331,6 +345,7 @@ export class Application {
       .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
     return {
       settings: this.settings,
+      scheduler_error: this.schedulerError,
       accounts: [...this.catalog.values()],
       loaded_accounts: this.accounts,
       entities: this.rows(),
@@ -503,7 +518,7 @@ export class Application {
       entities: undefined,
     };
   }
-  compareHistory(before: string, after: string, scope: Scope = {}) {
+  async compareHistory(before: string, after: string, scope: Scope = {}) {
     const previous = this.snapshots.get(before),
       current = this.snapshots.get(after);
     const first = {
@@ -540,7 +555,7 @@ export class Application {
     };
     const suffix =
       scope.platforms?.length || scope.accounts?.length || scope.products?.length
-        ? `/${createHash("sha256").update(scopeKey(scope)).digest("hex").slice(0, 16)}`
+        ? `/${(await sha256(scopeKey(scope))).slice(0, 16)}`
         : "";
     this.storage.put("change_events", `${before}/${after}${suffix}`, response);
     return response;
@@ -568,10 +583,7 @@ export class Application {
     };
   }
   clearCache() {
-    for (const record of this.storage.database
-      .prepare("SELECT key FROM cache")
-      .all())
-      this.storage.delete("cache", String(record.key));
+    for (const key of this.storage.keys("cache")) this.storage.delete("cache", key);
     this.lastSync = null;
     return {
       message:

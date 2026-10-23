@@ -1,17 +1,31 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
+const testBuild = process.env.LAYA_BUILD_TARGET === "test";
+const modelOrigin = process.env.NEXT_PUBLIC_LAYA_MODEL_BASE_URL ? new URL(process.env.NEXT_PUBLIC_LAYA_MODEL_BASE_URL).origin : "";
+const contentSecurityPolicy = [
+  "default-src 'self'", "base-uri 'self'", "object-src 'none'", "frame-ancestors 'none'", "form-action 'self'",
+  `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
+  "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "font-src 'self' data:", "worker-src 'self' blob:",
+  `connect-src 'self' https://graph.facebook.com https://googleads.googleapis.com https://apis.moment.kakao.com https://kapi.kakao.com https://github.com https://release-assets.githubusercontent.com https://objects.githubusercontent.com ${modelOrigin}${process.env.NODE_ENV === "development" ? " ws: wss:" : ""}`,
+].join("; ");
 const nextConfig: NextConfig = {
-  env: { NEXT_PUBLIC_LAYA_TEST_MODE: "0", NEXT_PUBLIC_LAYA_LOCAL_SWITCH: "0" },
+  distDir: testBuild ? ".next-test" : ".next",
+  typescript: { tsconfigPath: testBuild ? "tsconfig.test.json" : "tsconfig.json" },
+  env: { NEXT_PUBLIC_LAYA_TEST_MODE: testBuild ? "1" : "0", NEXT_PUBLIC_LAYA_LOCAL_SWITCH: "0" },
   webpack(config) {
-    config.watchOptions = { ...config.watchOptions, ignored: ["**/node_modules/**", "**/.git/**", "**/.next/**", "**/data/**", "**/output/**", "**/policies/local/**"] };
+    config.resolve.alias["@browser-runtime"] = path.resolve(testBuild ? "./testing/browser-runtime.ts" : "./src/browser/runtime-factory.ts");
+    config.watchOptions = { ...config.watchOptions, ignored: ["**/node_modules/**", "**/.git/**", "**/.next/**", "**/.next-test/**", "**/data/**", "**/output/**", "**/policies/local/**"] };
     return config;
   },
   reactStrictMode: true,
-  serverExternalPackages: ["@receptron/laya", "onnxruntime-node", "@napi-rs/keyring"],
+  serverExternalPackages: [],
   poweredByHeader: false,
-  turbopack: { root: process.cwd() },
-  outputFileTracingExcludes: { "/*": ["./data/**/*", "./output/**/*", "./policies/local/**/*", "./config/**/*", "./.env*", "./.git/**/*", "./.playwright-cli/**/*"] },
-  outputFileTracingIncludes: { "/api/*": ["./policies/default.yaml"] },
+  turbopack: { root: process.cwd(), resolveAlias: { "@browser-runtime": testBuild ? "./testing/browser-runtime.ts" : "./src/browser/runtime-factory.ts" } },
+  outputFileTracingExcludes: { "/*": ["./data/**/*", "./output/**/*", "./policies/local/**/*", "./config/**/*", "./.env*", "./.git/**/*", "./.playwright-cli/**/*", ...(testBuild ? [] : ["./testing/**/*"]), "./tests-ts/**/*", "./tests-integration/**/*", "./e2e/**/*", "./scripts/**/*", "./docs/**/*", "./benchmarks/**/*", "./src/server/api.ts", "./src/server/application.ts", "./src/server/ai.ts", "./src/server/storage.ts", "./src/server/credentials.ts", "./node_modules/@playwright/**/*", "./node_modules/onnxruntime-node/**/*", "./node_modules/@napi-rs/**/*"] },
+  logging: false,
+  async headers() { return [{ source: "/:path*", headers: [{ key: "Content-Security-Policy", value: contentSecurityPolicy }, { key: "Referrer-Policy", value: "no-referrer" }, { key: "X-Content-Type-Options", value: "nosniff" }, { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" }] }]; },
+  outputFileTracingIncludes: {},
 };
 
 export default nextConfig;

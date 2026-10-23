@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Cable, Check, ChevronRight, Clock3, Cpu, Eye, EyeOff, LockKeyhole, RotateCcw, Save, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { BrowserModelTools, BrowserBackupTools } from "@/components/BrowserTools";
 import type { Account, Settings } from "@/contracts/api";
 import { PageHeader, PlatformMark } from "@/components/shared";
 import { Button } from "@/components/ui/button";
@@ -27,7 +28,7 @@ const credentialLabels: Record<string, string> = {
 const credentialHints: Record<string, string> = {
   meta: "조회할 광고 계정에 접근할 수 있는 액세스 토큰을 입력하세요.",
   naver: "검색광고 API에서 발급받은 키와 조회할 광고 계정 ID를 입력하세요.",
-  google: "OAuth 인증 정보 또는 액세스 토큰을 사용할 수 있습니다. 관리자 계정 ID는 필요한 경우에만 입력하세요.",
+  google: "사용자 액세스 토큰을 입력하세요. 관리자 계정 ID는 필요한 경우에만 입력합니다. 토큰은 이 탭의 메모리에만 보관합니다.",
   kakao: "조회할 모먼트 광고 계정에 접근할 수 있는 비즈니스 토큰을 입력하세요.",
   kakao_keyword: "프리미엄링크 계정의 keyword_management 동의를 받은 비즈니스 토큰을 입력하세요. 톡채널검색은 제외합니다.",
 };
@@ -48,7 +49,7 @@ export default function SettingsPage({ accounts, onRefresh }: { accounts: Accoun
   const [restart, setRestart] = useState(false);
   const [schema, setSchema] = useState<Record<string, string[]>>({});
   const [platform, setPlatform] = useState("meta");
-  const [googleAuth, setGoogleAuth] = useState("oauth");
+  const [googleAuth, setGoogleAuth] = useState("token");
   const [credentials, setCredentials] = useState<Record<string, string>>({});
   const [visible, setVisible] = useState<Record<string, boolean>>({});
   const [savedCredentials, setSavedCredentials] = useState<string[]>([]);
@@ -107,18 +108,18 @@ export default function SettingsPage({ accounts, onRefresh }: { accounts: Accoun
 
   return <div className="settings-studio" data-unsaved-changes={unsaved ? "true" : undefined}>
     <PageHeader title="설정" description="광고 계정을 연결하고, 조회와 모델 실행 방식을 설정하세요."><span className="settings-local-badge"><LockKeyhole size={13} />이 PC의 설정</span></PageHeader>
-    {(restart || !!savedCredentials.length) && <Notice tone="warning"><strong>앱을 다시 실행하면 저장한 변경이 적용됩니다.</strong><p className="mt-1">실행 중인 터미널을 종료한 뒤 앱을 다시 시작하세요. 인증 정보를 변경했다면 재시작 후 데이터를 새로고침해 계정 조회를 확인하세요.</p></Notice>}
+    {restart && <Notice tone="warning"><strong>새로고침하면 저장한 환경 설정이 적용됩니다.</strong><p className="mt-1">새로고침 후 API 인증 정보는 다시 연결해 주세요.</p></Notice>}
     {!draft ? <div className="settings-loading" role="status">{error ? <><p role="alert">설정을 불러오지 못했습니다. {error}</p><Button variant="outline" onClick={() => setReload(value => value + 1)}><RotateCcw size={15} />다시 불러오기</Button></> : "설정을 불러오는 중입니다…"}</div> : <>
       {error && <Notice tone="error">{error}</Notice>}
       <div className="settings-workspace">
         <aside className="settings-sidebar">
           <nav aria-label="설정 항목">{sections.map(item => <button key={item.id} type="button" aria-pressed={section === item.id} disabled={!!busy} onClick={() => setSection(item.id as Section)}><item.icon size={18} /><span><strong>{item.label}</strong><small>{item.description}</small></span><ChevronRight size={14} /></button>)}</nav>
-          {active && <div className="settings-runtime" aria-label="현재 적용 중인 설정"><span className="settings-eyebrow">현재 적용 중</span><h2>실행 환경</h2><dl><div><dt>데이터</dt><dd>{"광고 API"}</dd></div><div><dt>질문 해석</dt><dd>{"학습 모델"}</dd></div><div><dt>기준 시간대</dt><dd>{active.timezone}</dd></div></dl><p>{restart ? "저장한 환경 설정이 아직 적용되지 않았습니다." : "환경 설정은 저장 후 재시작하면 적용됩니다."}</p></div>}
+          {active && <div className="settings-runtime" aria-label="현재 적용 중인 설정"><span className="settings-eyebrow">현재 적용 중</span><h2>실행 환경</h2><dl><div><dt>데이터</dt><dd>{active.mode === "mock" ? "합성 테스트 데이터" : "광고 API"}</dd></div><div><dt>질문 해석</dt><dd>{active.ai_mode === "mock" ? "테스트 해석기" : "브라우저 학습 모델"}</dd></div><div><dt>기준 시간대</dt><dd>{active.timezone}</dd></div></dl><p>{restart ? "저장한 환경 설정이 아직 적용되지 않았습니다." : "환경 설정은 저장 후 새로고침하면 적용됩니다."}</p></div>}
         </aside>
         <div className="settings-main">
           {section === "connections" && <section className="settings-panel" id="settings-connections" aria-label="광고 API 연결">
             <div className="settings-panel-heading"><span className="settings-section-icon"><Cable size={20} /></span><div><h2>광고 API 연결</h2><p>연결할 매체를 선택하고 인증 정보를 저장하세요.</p></div></div>
-            <div className="settings-media-grid">{media.map(item => { const count = accounts.filter(account => account.platform === item).length; return <button type="button" key={item} aria-label={`${platformNames[item]} 연결 설정`} aria-pressed={platform === item} disabled={!!busy || !schema[item]?.length} onClick={() => { if (item !== platform && discardCredentials()) { resetCredentials(); setGoogleAuth("oauth"); setPlatform(item); } }}>
+            <div className="settings-media-grid">{media.map(item => { const count = accounts.filter(account => account.platform === item).length; return <button type="button" key={item} aria-label={`${platformNames[item]} 연결 설정`} aria-pressed={platform === item} disabled={!!busy || !schema[item]?.length} onClick={() => { if (item !== platform && discardCredentials()) { resetCredentials(); setGoogleAuth("token"); setPlatform(item); } }}>
               <span className="settings-media-logo"><PlatformMark platform={item} withLabel={false} />{item === "meta" && <strong>Meta</strong>}</span>{(item === "kakao" || item === "kakao_keyword") && <strong className="text-xs font-medium">{platformNames[item]}</strong>}<span>{count ? `조회된 계정 ${count}개` : "계정 조회 전"}</span>{platform === item && <Check size={14} />}
             </button>; })}</div>
             {!keys.length ? <div className="settings-empty">사용 가능한 인증 항목이 없습니다. 앱을 다시 실행해 주세요.</div> : <div className="settings-connection-body">
@@ -130,15 +131,15 @@ export default function SettingsPage({ accounts, onRefresh }: { accounts: Accoun
               }); }}>
                 <div className="settings-form-intro"><h3>{platformNames[platform]} 인증 정보</h3><p>{credentialHints[platform]}</p></div>
                 <fieldset disabled={!!busy}>
-                  {platform === "google" && <Field label="인증 방식"><Pick label="Google 인증 방식" value={googleAuth} options={[{ value: "oauth", label: "OAuth 인증" }, { value: "token", label: "액세스 토큰" }]} onChange={value => { if (value !== googleAuth && discardCredentials()) { resetCredentials(); setGoogleAuth(value); } }} /></Field>}
+                  {platform === "google" && <Field label="인증 방식"><Pick label="Google 인증 방식" value={googleAuth} options={[{ value: "token", label: "액세스 토큰" }]} onChange={value => { if (value !== googleAuth && discardCredentials()) { resetCredentials(); setGoogleAuth(value); } }} /></Field>}
                   {keys.map(key => <Field key={`${platform}/${key}`} label={`${credentialLabels[key] ?? key}${key === "login_customer_id" ? " (선택)" : ""}`}>
                     <div className="settings-secret"><Input aria-label={credentialLabels[key] ?? key} type={visible[key] ? "text" : "password"} autoComplete="off" spellCheck={false} value={credentials[key] ?? ""} maxLength={65_536} placeholder="새 값을 입력하세요" onChange={event => setCredentials(previous => ({ ...previous, [key]: event.target.value }))} /><Button type="button" variant="ghost" size="icon" aria-label={`${credentialLabels[key] ?? key} ${visible[key] ? "숨기기" : "표시"}`} onClick={() => setVisible(previous => ({ ...previous, [key]: !previous[key] }))}>{visible[key] ? <EyeOff size={16} /> : <Eye size={16} />}</Button></div>
                   </Field>)}
                 </fieldset>
-                {savedCredentials.includes(platform) && !credentialsDirty && <p className="settings-credential-saved" role="status"><Check size={15} />인증 정보 저장됨 · 재시작 후 연결을 확인하세요.</p>}
-                <div className="settings-credential-actions"><Button type="button" variant="ghost" disabled={!!busy || !credentialsDirty} onClick={resetCredentials}>입력 지우기</Button><LoadingButton type="submit" loading={busy === "credentials"} disabled={!!busy || !Object.values(credentials).some(value => value.trim())}><LockKeyhole size={15} />인증 정보 저장</LoadingButton></div>
+                {savedCredentials.includes(platform) && !credentialsDirty && <p className="settings-credential-saved" role="status"><Check size={15} />이 탭에 연결됨 · 데이터를 새로고침해 확인하세요.</p>}
+                <div className="settings-credential-actions"><Button type="button" variant="ghost" disabled={!!busy || !credentialsDirty} onClick={resetCredentials}>입력 지우기</Button><LoadingButton type="submit" loading={busy === "credentials"} disabled={!!busy || !Object.values(credentials).some(value => value.trim())}><LockKeyhole size={15} />이 탭에 연결</LoadingButton></div>
               </form>
-              <aside className="settings-connection-guide"><ShieldCheck size={22} /><h3>연결 후 바로 QA를 시작하세요</h3><ol><li>인증 정보를 저장합니다.</li><li>앱을 종료한 뒤 다시 실행합니다.</li><li>조회 범위를 선택하고 데이터를 새로고침합니다.</li><li>검색에서 질문하거나 현황에서 전체 QA를 실행합니다.</li></ol><p>인증 정보는 OS 인증 저장소에 보관하며 저장된 값은 다시 표시하지 않습니다. 새로 저장하면 해당 매체의 기존 인증 정보를 교체합니다.</p><small>계정 수는 조회 결과입니다. 인증 정보 저장만으로 연결 성공을 판단하지 않습니다.</small></aside>
+              <aside className="settings-connection-guide"><ShieldCheck size={22} /><h3>연결 후 바로 QA를 시작하세요</h3><ol><li>API 인증 정보로 이 탭에 연결합니다.</li><li>새로고침하거나 탭을 닫으면 인증 정보를 다시 입력합니다.</li><li>조회 범위를 선택하고 데이터를 새로고침합니다.</li><li>검색에서 질문하거나 현황에서 전체 QA를 실행합니다.</li></ol><p>인증 정보는 이 탭의 메모리에만 보관합니다. 네이버 검색광고와 카카오 키워드광고 조회만 서버를 일시 경유하며, 서비스는 중계한 광고 데이터와 인증 정보를 서버에 저장하지 않습니다.</p><small>계정 수는 조회 결과입니다. 인증 정보 저장만으로 연결 성공을 판단하지 않습니다.</small></aside>
             </div>}
           </section>}
           <form id="settings-preferences" noValidate onSubmit={event => { event.preventDefault(); if (!dirty || invalid || !draft) return; void action("settings", async () => {
@@ -152,17 +153,17 @@ export default function SettingsPage({ accounts, onRefresh }: { accounts: Accoun
             {section === "data" && <section className="settings-panel" id="settings-data" aria-label="조회·이력 설정">
               <div className="settings-panel-heading"><span className="settings-section-icon"><Clock3 size={20} /></span><div><h2>조회·이력</h2><p>데이터를 다시 가져오는 주기와 변경 비교용 저장 간격을 정하세요.</p></div></div>
               <fieldset disabled={!!busy} className="settings-fields"><NumberField name="cache_ttl_seconds" draft={draft} change={change} /><NumberField name="snapshot_interval_seconds" draft={draft} change={change} /><Field label="기준 시간대" hint="질문의 날짜·기간과 운영 일정을 판단할 때 사용합니다."><Input aria-label="기준 시간대" maxLength={100} value={draft.timezone} placeholder="Asia/Seoul" onChange={event => change("timezone", event.target.value)} /></Field></fieldset>
-              <div className="settings-maintenance"><div><h3>조회 데이터 비우기</h3><p>임시 조회 데이터를 비웁니다. 다음 데이터 새로고침에서 최신 정보를 가져오며, 저장한 정책과 검사·변경 이력은 유지됩니다.</p></div><LoadingButton type="button" variant="outline" loading={busy === "cache"} disabled={!!busy} onClick={() => void action("cache", async () => { const result = await api<{ message: string }>("/cache/clear", { method: "POST" }); if (!mounted.current) return; onRefresh?.(); toast.success(result.message); })}><Trash2 size={15} />조회 데이터 비우기</LoadingButton></div>
+              <BrowserBackupTools /><div className="settings-maintenance"><div><h3>조회 데이터 비우기</h3><p>임시 조회 데이터를 비웁니다. 다음 데이터 새로고침에서 최신 정보를 가져오며, 저장한 정책과 검사·변경 이력은 유지됩니다.</p></div><LoadingButton type="button" variant="outline" loading={busy === "cache"} disabled={!!busy} onClick={() => void action("cache", async () => { const result = await api<{ message: string }>("/cache/clear", { method: "POST" }); if (!mounted.current) return; onRefresh?.(); toast.success(result.message); })}><Trash2 size={15} />조회 데이터 비우기</LoadingButton></div>
             </section>}
             {section === "model" && <section className="settings-panel" id="settings-model" aria-label="모델 실행 설정">
               <div className="settings-panel-heading"><span className="settings-section-icon"><Cpu size={20} /></span><div><h2>모델 실행</h2><p>한국어 질문을 조회 조건으로 해석하는 로컬 모델의 실행 방식입니다.</p></div></div>
-              <div className="settings-model-info"><span className="settings-eyebrow">기본 배포 모델</span><h3>광고 설정 질문에 맞춘 학습 모델</h3><p>최초 사용 시 모델 파일을 자동으로 내려받고, 이후에는 저장된 파일을 사용합니다. 질문 해석은 이 PC의 CPU에서 실행합니다.</p><span>약 1.35GB · 별도 AI API 키 불필요</span></div>
+              <div className="settings-model-info"><span className="settings-eyebrow">기본 배포 모델</span><h3>광고 설정 질문에 맞춘 학습 모델</h3><p>공개 모델 파일을 준비하면 이후 저장된 파일을 사용합니다. 질문 해석은 이 브라우저에서 실행합니다.</p><span>약 1.35GB · 별도 AI API 키 불필요</span></div><BrowserModelTools />
               <fieldset disabled={!!busy} className="settings-model-options"><label className="settings-switch-row"><span><strong>앱 시작 시 모델 미리 불러오기</strong><small>첫 질문의 대기를 줄입니다. 앱 시작 시간과 메모리 사용량이 늘어날 수 있습니다.</small></span><Checkbox aria-label="앱 시작 시 모델 미리 불러오기" checked={draft.preload_model} onCheckedChange={checked => change("preload_model", checked === true)} /></label>
-                <details className="settings-advanced"><summary>고급 실행 설정 <ChevronRight size={15} /></summary><p>기본값 사용을 권장합니다. 변경한 값은 앱을 다시 실행하면 적용됩니다.</p><div className="settings-fields"><NumberField name="semantic_threshold" draft={draft} change={change} /><NumberField name="batch_size" draft={draft} change={change} /><NumberField name="cpu_threads" draft={draft} change={change} /></div></details>
+                <details className="settings-advanced"><summary>고급 실행 설정 <ChevronRight size={15} /></summary><p>기본값 사용을 권장합니다. 변경한 값은 페이지를 새로고침하면 적용됩니다.</p><div className="settings-fields"><NumberField name="semantic_threshold" draft={draft} change={change} /><NumberField name="batch_size" draft={draft} change={change} /></div></details>
               </fieldset>
             </section>}
           </form>
-          <footer className="settings-save-bar"><div><strong>{dirty ? "저장하지 않은 환경 설정이 있습니다" : restart ? "환경 설정 저장됨 · 재시작 대기" : "환경 설정 변경 없음"}</strong><p>{invalid || "인증 정보는 위 연결 화면에서 별도로 저장합니다."}</p></div><div><Button type="button" variant="outline" disabled={!!busy || !dirty} onClick={() => { setDraft(baseline); setError(""); }}>변경 취소</Button><LoadingButton type="submit" form="settings-preferences" loading={busy === "settings"} disabled={!!busy || !dirty || !!invalid}><Save size={15} />설정 저장</LoadingButton></div></footer>
+          <footer className="settings-save-bar"><div><strong>{dirty ? "저장하지 않은 환경 설정이 있습니다" : restart ? "환경 설정 저장됨 · 새로고침 대기" : "환경 설정 변경 없음"}</strong><p>{invalid || "인증 정보는 위 연결 화면에서 별도로 저장합니다."}</p></div><div><Button type="button" variant="outline" disabled={!!busy || !dirty} onClick={() => { setDraft(baseline); setError(""); }}>변경 취소</Button><LoadingButton type="submit" form="settings-preferences" loading={busy === "settings"} disabled={!!busy || !dirty || !!invalid}><Save size={15} />설정 저장</LoadingButton></div></footer>
         </div>
       </div>
     </>}

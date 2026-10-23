@@ -248,7 +248,7 @@ function boundedTree(value: unknown): void {
 }
 
 export function loadYaml(source: string): Record<string, unknown> {
-  if (Buffer.byteLength(source, "utf8") > 1_000_000)
+  if (new TextEncoder().encode(source).byteLength > 1_000_000)
     throw new Error("정책 파일은 1 MB 이하여야 합니다.");
   const document = parseDocument(source, { strict: true, intAsBigInt: true });
   if (document.errors.length || document.warnings.length)

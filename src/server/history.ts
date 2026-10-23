@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+const randomUUID = () => crypto.randomUUID();
 import { DateTime } from "luxon";
 import {
   createEntity,
@@ -11,7 +11,8 @@ import {
 } from "./models";
 import { decimal, deepEqual } from "./policies/values";
 import { observe } from "./policies/evaluation";
-import type { Storage } from "./storage";
+import type { BrowserStorage } from "../browser/storage";
+type Storage = Pick<BrowserStorage, "get" | "put" | "list" | "delete">;
 import { productKey } from "../lib/ad-products";
 import { PlatformError } from "./platforms/base";
 

@@ -39,6 +39,7 @@ import PoliciesPage from "@/views/PoliciesPage";
 import HistoryPage from "@/views/HistoryPage";
 import SettingsPage from "@/views/SettingsPage";
 import { api } from "@/lib/api";
+import { browserCall } from "@/browser/client";
 import { confirmDiscard } from "@/lib/navigation-guard";
 import type { Account, AppState, Scope } from "@/contracts/api";
 import { AD_PRODUCTS } from "@/lib/ad-products";
@@ -73,6 +74,8 @@ function Workspace() {
   const lastPages = useRef<Record<string, string>>({});
   const scrollPositions = useRef<Record<string, number>>({});
   const [state, setState] = useState<AppState | null>(null);
+  const [runtimeLabel, setRuntimeLabel] = useState("브라우저에서 처리");
+  useEffect(() => { void browserCall<{label:string}>("/runtime").then(value => setRuntimeLabel(value.label)).catch(() => undefined); }, []);
   const [policyId, setPolicyId] = useState("");
   const [auditRequest, setAuditRequest] = useState(0);
   const [auditToOpen, setAuditToOpen] = useState("");
@@ -331,7 +334,7 @@ function Workspace() {
               {state && (
                 <>
                   <Badge variant="outline" className="data-mode-badge">
-                    {state.accounts.length ? "광고 API" : "API 연결 필요"}
+                    {runtimeLabel}
                   </Badge>
                   {syncing ? (
                     <span className="sync-progress" role="status">

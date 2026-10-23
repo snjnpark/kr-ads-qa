@@ -1,25 +1,9 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import {
-  defaultReleaseSelection,
-  ensureModelRelease,
-  releaseDirectory,
-  ModelReleaseError,
-  type ModelRelease,
-} from "./model-release";
-import type { ChoiceQuestion } from "@receptron/laya";
-import type { QueryContext } from "./query";
-import { interpretQuery, QUERY_PLAN_VERSION, type QueryTrace } from "./query-model";
-import {
-  DEFAULT_MODEL_DIRECTORY,
-  MODEL_ID,
-  MODEL_REVISION,
-  prepareBundle,
-  verifyBundle,
-  verifyCandidateBundle,
-  candidateModelVersion,
-} from "./laya-bundle";
-
+import type { ChoiceQuestion } from "./types";
+import type { QueryContext } from "../../server/query";
+import { interpretQuery } from "../../server/query-model";
+import { MODEL_RELEASE, type ModelLoadOptions } from "./cache";
+import { createBrowserAgent } from "./inference";
+import type { ModelConfig } from "./types";
 export const INTENTS = {
   search: "Find or count advertising entities matching conditions",
   inspect: "Inspect an entity's settings or details",
@@ -106,17 +90,6 @@ export interface TypedAgent {
   ): Promise<ModelResult>;
   close?(): Promise<void>;
 }
-export type EngineOptions = {
-  mock?: boolean;
-  threshold?: number;
-  margin?: number;
-  batchSize?: number;
-  cpuThreads?: number;
-  modelDirectory?: string;
-  modelKind?: "baseline" | "candidate";
-  candidateId?: string;
-  agent?: TypedAgent;
-};
 
 function checkedText(value: unknown): string {
   if (
@@ -187,186 +160,41 @@ const domainPatterns = [
   /(구매|전환|매출|purchase|sales|conversion)/i,
 ];
 
-export class LayaEngine {
-  readonly mock: boolean;
+
+/** Real model decision policy; runs exclusively inside the model Worker. */
+export class BrowserModelCore {
   readonly threshold: number;
   readonly margin: number;
   readonly batchSize: number;
-  readonly cpuThreads: number;
-  readonly modelDirectory: string;
-  readonly modelKind: "baseline" | "candidate";
-  readonly candidateId?: string;
-  private candidateVersion?: string;
-  private release?: ModelRelease;
   private agent?: TypedAgent;
   private loading?: Promise<TypedAgent>;
   private encode?: (text: string) => number[];
-  private config?: { max_len: number; head_max_len: number; condition_classifier?: "ads-conditions-v1" | "ads-conditions-v2" };
+  private config?: ModelConfig;
   private queue: Promise<unknown> = Promise.resolve();
-  constructor(options: EngineOptions = {}) {
-    if (options.mock) throw new Error("프로덕션에서는 학습 모델만 사용할 수 있습니다.");
-    this.mock = false;
+  constructor(private options: ModelLoadOptions & { threshold?: number; margin?: number; batchSize?: number } = {}) {
     this.threshold = options.threshold ?? 0.8;
     this.margin = options.margin ?? 0.1;
     this.batchSize = options.batchSize ?? 8;
-    this.cpuThreads = options.cpuThreads ?? 8;
-    this.release = defaultReleaseSelection(options) ?? undefined;
-    this.modelDirectory = this.release
-      ? releaseDirectory(this.release)
-      : (options.modelDirectory ??
-        (options.modelKind === "baseline" || this.mock
-          ? DEFAULT_MODEL_DIRECTORY
-          : "data/models/releases"));
-    this.modelKind = this.release
-      ? "candidate"
-      : (options.modelKind ?? (this.mock ? "baseline" : "candidate"));
-    this.candidateId = this.release?.candidate_id ?? options.candidateId;
-    if (
-      options.modelKind === "candidate" &&
-      (!options.modelDirectory ||
-        !options.candidateId ||
-        !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(options.candidateId) ||
-        this.mock)
-    )
-      throw new Error(
-        "Candidate loading requires an explicit directory and candidate ID",
-      );
-    if (
-      (!options.modelKind || this.modelKind === "baseline") &&
-      options.candidateId
-    )
-      throw new Error("Candidate ID requires explicit candidate model loading");
-    this.agent = options.agent;
-    if (
-      !Number.isFinite(this.threshold) ||
-      this.threshold < 0 ||
-      this.threshold > 1 ||
-      !Number.isFinite(this.margin) ||
-      this.margin < 0 ||
-      this.margin > 1 ||
-      !Number.isInteger(this.batchSize) ||
-      this.batchSize < 1 ||
-      this.batchSize > 256 ||
-      !Number.isInteger(this.cpuThreads) ||
-      this.cpuThreads < 1 ||
-      this.cpuThreads > 64
-    )
-      throw new Error("의미 판단 설정값이 올바르지 않습니다.");
+    if (!Number.isFinite(this.threshold) || this.threshold < 0 || this.threshold > 1 || !Number.isFinite(this.margin) || this.margin < 0 || this.margin > 1 || !Number.isInteger(this.batchSize) || this.batchSize < 1 || this.batchSize > 256) throw new Error("의미 판단 설정값이 올바르지 않습니다.");
   }
-  get source() {
-    return "laya";
-  }
-  get modelVersion() {
-
-    const identity =
-      this.modelKind === "candidate"
-        ? (this.candidateVersion ??
-          (this.candidateId
-            ? `candidate:${this.candidateId};unverified`
-            : "finetuned-model:unconfigured"))
-        : `${MODEL_ID}/multilingual@${MODEL_REVISION}`;
-    return `${identity};@receptron/laya=0.2.0;cpu;onnx;heads=${this.modelKind === "candidate" ? "candidate" : "base"};axes;policy=${SEMANTIC_POLICY_VERSION}`;
-  }
-  async load(): Promise<TypedAgent | null> {
-
+  get source() { return "laya"; }
+  get modelVersion() { return `candidate:${MODEL_RELEASE.candidate_id}@${MODEL_RELEASE.files["candidate-manifest.json"].sha256};onnxruntime-web=1.30.0;wasm;heads=candidate;axes;policy=${SEMANTIC_POLICY_VERSION}`; }
+  async load(): Promise<TypedAgent> {
     if (this.agent) return this.agent;
-    if (!this.loading)
-      this.loading = (async () => {
-        const manifest = path.join(this.modelDirectory, "node-manifest.json");
-        if (this.modelKind === "candidate") {
-          if (!this.candidateId)
-            throw new ModelReleaseError(
-              "배포용 파인튜닝 모델이 지정되지 않았습니다. 배포 모델을 지정해 주세요.",
-            );
-          if (this.release) await ensureModelRelease(this.release);
-          this.candidateVersion = candidateModelVersion(
-            await verifyCandidateBundle(this.modelDirectory, this.candidateId),
-          );
-        } else {
-          if (
-            !(await readFile(/* turbopackIgnore: true */ manifest).catch(
-              () => null,
-            ))
-          ) {
-            if (
-              path.resolve(this.modelDirectory) !==
-                path.resolve(DEFAULT_MODEL_DIRECTORY) ||
-              (await readFile(
-                /* turbopackIgnore: true */ path.join(
-                  this.modelDirectory,
-                  "candidate-manifest.json",
-                ),
-              ).catch(() => null))
-            )
-              throw new Error(
-                "An explicit model directory requires its registered bundle; baseline auto-preparation is disabled",
-              );
-            await prepareBundle({ directory: this.modelDirectory });
-          }
-          await verifyBundle(this.modelDirectory);
-        }
-        const [{ Laya }, { Tokenizer }] = await Promise.all([
-          import("@receptron/laya"),
-          import("@huggingface/tokenizers"),
-        ]);
-        const tokenizer = new Tokenizer(
-          JSON.parse(
-            await readFile(
-              /* turbopackIgnore: true */
-              path.join(this.modelDirectory, "tokenizer/tokenizer.json"),
-              "utf8",
-            ),
-          ),
-          JSON.parse(
-            await readFile(
-              /* turbopackIgnore: true */
-              path.join(this.modelDirectory, "tokenizer/tokenizer_config.json"),
-              "utf8",
-            ),
-          ),
-        );
-        this.encode = (text) =>
-          tokenizer.encode(text, { add_special_tokens: false }).ids;
-        this.config = JSON.parse(
-          await readFile(
-            /* turbopackIgnore: true */
-            path.join(this.modelDirectory, "laya_config.json"),
-            "utf8",
-          ),
-        );
-        const delegate = await Laya.load({
-          modelDir: this.modelDirectory,
-          executionProviders: ["cpu"],
-          sessionOptions: {
-            intraOpNumThreads: this.cpuThreads,
-            interOpNumThreads: 1,
-          },
-        });
-        try {
-          this.agent = this.config?.condition_classifier
-            ? await (await import("./condition-classifier")).loadConditionAgent(
-              this.modelDirectory, delegate, this.encode, this.cpuThreads, this.config.condition_classifier,
-            )
-            : delegate;
-        } catch (error) {
-          await delegate.close?.();
-          throw error;
-        }
-        return this.agent;
-      })().catch((error) => {
-        this.loading = undefined;
-        throw error;
-      });
+    if (!this.loading) this.loading = createBrowserAgent(this.options).then(loaded => {
+      this.agent = loaded.agent; this.encode = loaded.encode; this.config = loaded.config;
+      // File selections are unnecessary once verified assets have entered their public cache.
+      this.options.files = undefined;
+      return loaded.agent;
+    }).catch(error => { this.loading = undefined; throw error; });
     return this.loading;
   }
   async close() {
     await this.queue.catch(() => undefined);
-    if (this.loading) await this.loading.catch(() => undefined);
-    await this.agent?.close?.();
-    this.agent = undefined;
-    this.loading = undefined;
+    await this.loading?.catch(() => undefined);
+    await this.agent?.close?.(); this.agent = undefined; this.loading = undefined;
   }
-  private decision(
+private decision(
     label: string | null,
     identity: string | null,
     reason: string,
@@ -385,10 +213,10 @@ export class LayaEngine {
       ...values,
     };
   }
-  private abstain(reason: string, identity: string | null = null) {
+private abstain(reason: string, identity: string | null = null) {
     return this.decision(null, identity, reason, { status: "UNKNOWN" });
   }
-  private async infer(
+private async infer(
     state: unknown,
     questions: Record<string, ChoiceQuestion>,
   ) {
@@ -456,7 +284,7 @@ export class LayaEngine {
     this.queue = operation;
     return operation;
   }
-  private decode(
+private decode(
     result: ModelResult,
     qid: string,
     allowed: string[],
@@ -501,7 +329,7 @@ export class LayaEngine {
       { status: uncertain ? "REVIEW" : "PASS", scores },
     );
   }
-  async parseQuery(text: string, context?: QueryContext, now = new Date(), timezone = "Asia/Seoul") {
+async parseQuery(text: string, context?: QueryContext, now = new Date(), timezone = "Asia/Seoul") {
     checkedText(text);
 
     return interpretQuery(text, context, now, timezone, async (state, questions) => {
@@ -512,7 +340,7 @@ export class LayaEngine {
       }));
     }, () => this.modelVersion);
   }
-  async classify(text: string): Promise<Decision> {
+async classify(text: string): Promise<Decision> {
     try {
       if (!checkedText(text).trim())
         return this.abstain("질문이 비어 있습니다.");
@@ -526,15 +354,13 @@ export class LayaEngine {
         "intent",
         Object.keys(INTENTS),
       );
-    } catch (error) {
+    } catch {
       return this.abstain(
-        error instanceof ModelReleaseError
-          ? error.message
-          : "Laya 의도 분류를 완료하지 못했습니다. 모델 파일과 입력 길이를 확인해 주세요.",
+        "Laya 의도 분류를 완료하지 못했습니다. 모델 파일과 입력 길이를 확인해 주세요.",
       );
     }
   }
-  async judgeBatch(
+async judgeBatch(
     items: SemanticInput[],
     question: string,
   ): Promise<Decision[]> {
@@ -678,12 +504,10 @@ export class LayaEngine {
               },
             ),
           );
-        } catch (error) {
+        } catch {
           decisions.push(
             this.abstain(
-              error instanceof ModelReleaseError
-                ? error.message
-                : "Laya 의미 판단을 완료하지 못했습니다. 모델 파일과 입력 길이를 확인해 주세요.",
+              "Laya 의미 판단을 완료하지 못했습니다. 모델 파일과 입력 길이를 확인해 주세요.",
               identity,
             ),
           );

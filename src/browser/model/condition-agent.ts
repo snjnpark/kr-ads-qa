@@ -1,7 +1,5 @@
-import path from "node:path";
-import type { TypedAgent } from "./ai";
-import conditionCatalog from "./condition-catalog.json";
-import { conditionTextFeatures, CONDITION_LEXICAL_WIDTH } from "./condition-features";
+import type { TypedAgent } from "./types";
+import conditionCatalog from "../../server/condition-catalog.json";
 
 type ModelResult = Awaited<ReturnType<TypedAgent["systemOne"]>>;
 export type ConditionInput =
@@ -86,46 +84,4 @@ export function createConditionAgent(
       })();
     },
   };
-}
-
-export async function loadConditionAgent(
-  directory: string, delegate: TypedAgent, encode: (request: string) => number[], cpuThreads = 8,
-  kind: "ads-conditions-v1" | "ads-conditions-v2" = "ads-conditions-v1",
-): Promise<TypedAgent> {
-  const { InferenceSession, Tensor } = await import("onnxruntime-node");
-  const session = await InferenceSession.create(/* turbopackIgnore: true */ path.join(directory, "laya.onnx"), {
-    executionProviders: ["cpu"], intraOpNumThreads: cpuThreads, interOpNumThreads: 1,
-  });
-  let lexical: typeof session | undefined;
-  try {
-    if (kind === "ads-conditions-v2") lexical = await InferenceSession.create(
-      /* turbopackIgnore: true */ path.join(directory, "condition-head.onnx"),
-      { executionProviders: ["cpu"], intraOpNumThreads: cpuThreads, interOpNumThreads: 1 },
-    );
-  } catch (error) { await session.release(); throw error; }
-  const toTensors = (feeds: Record<string, ConditionInput>) => Object.fromEntries(
-    Object.entries(feeds).map(([key, value]) => [key, value.type === "bool"
-      ? new Tensor("bool", value.data, value.dims) : new Tensor("int64", value.data, value.dims)]),
-  );
-  return createConditionAgent(delegate, encode, {
-    async run(feeds, request) {
-      if (!lexical) return session.run(toTensors(feeds));
-      if (typeof request !== "string") throw new Error("Condition text is missing");
-      const width = 2304;
-      const raw = await session.run(toTensors({ ...feeds,
-        marker_pos: int64(Array.from({ length: width }, (_, i) => i), [1, width]),
-        marker_mask: { type: "bool", data: new Uint8Array(width).fill(1), dims: [1, width] },
-        qtype: int64([4], [1]),
-      }));
-      const values = raw.logits.data;
-      if (!(values instanceof Float32Array) || values.length !== width || values.some(v => !Number.isFinite(v)))
-        throw new Error("Invalid condition encoder features");
-      const features = new Float32Array(width + CONDITION_LEXICAL_WIDTH);
-      features.set(values); features.set(conditionTextFeatures(request), width);
-      return lexical.run({ features: new Tensor("float32", features, [1, features.length]) });
-    },
-    async release() {
-      try { await lexical?.release(); } finally { await session.release(); }
-    },
-  });
 }

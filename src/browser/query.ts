@@ -1,14 +1,14 @@
-import { randomUUID } from "node:crypto";
-import type { Application } from "../application";
-import type { Entity, Json } from "../models";
-import type { Scope } from "../../contracts/domain";
-import { TEST_MODE } from "../../lib/runtime";
-import { semanticIdentity, type SemanticInput } from "../ai";
-import { observe } from "../policies/evaluation";
-import { decimal } from "../policies/values";
-import { execute, emptyContext, dateRange, type QueryContext } from "../query";
-import { QueryModelError, type QueryTrace } from "../query-model";
-import { selected, scopeKey } from "./scope";
+const randomUUID = () => crypto.randomUUID();
+import type { BrowserApplication as Application } from "./application";
+import type { Entity, Json } from "../server/models";
+import type { Scope } from "../contracts/domain";
+import { semanticIdentity } from "./model/identity";
+import type { SemanticInput } from "./model/protocol";
+import { observe } from "../server/policies/evaluation";
+import { decimal } from "../server/policies/values";
+import { execute, emptyContext, dateRange, type QueryContext } from "../server/query";
+import { QueryModelError, type QueryTrace } from "../server/query-model";
+import { selected, scopeKey } from "../server/application/scope";
 
 export type QueryResponse = Json & {
   rows: Json[];
@@ -30,7 +30,7 @@ export async function executeApplicationQuery(
   context: QueryContext = emptyContext(),
   scope: Scope = {},
 ): Promise<QueryResponse> {
-  if (!TEST_MODE && !application.accounts.length)
+  if (!application.accounts.length)
     return { rows: [], status: "REVIEW", message: "설정에서 광고 API를 연결하고 계정 데이터를 불러온 뒤 질문해 주세요." };
   let query;
   let interpretation: QueryTrace;
@@ -154,7 +154,7 @@ export async function executeApplicationQuery(
         message:
           "현재 설정을 저장했습니다. 비교할 이전 저장 기록이 없습니다.",
       };
-    const response = application.compareHistory(
+    const response = await application.compareHistory(
       prior[0].snapshot_id,
       saved.snapshot_id,
       effectiveScope,
@@ -323,7 +323,7 @@ export async function executeApplicationQuery(
   };
   application.storage.put("query_history", randomUUID(), {
     question: text,
-    response,
+    response: JSON.parse(JSON.stringify(response)),
     at: new Date().toISOString(),
   });
   return response;

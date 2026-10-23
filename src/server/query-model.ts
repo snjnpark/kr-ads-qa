@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { z } from "zod";
-import type { ChoiceQuestion } from "@receptron/laya";
+import type { ChoiceQuestion } from "../browser/model/types";
 import { PLATFORMS } from "./models";
 import { literalProducts, unquotedAdText, queryScopeText } from "../lib/ad-products";
 import { ACTIVE, INACTIVE, Clarification, dateRange, type Query, type QueryContext } from "./query";
