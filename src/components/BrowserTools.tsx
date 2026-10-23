@@ -15,7 +15,7 @@ export function BrowserModelTools() {
   };
   return <div className="settings-model-info" aria-label="브라우저 모델 준비">
     <h3>이 브라우저에서 모델 실행</h3>
-    <p>최초 준비에는 약 1.35GB의 공개 모델 파일이 필요합니다. 모델과 질문 해석은 사용자 기기에서 실행되며, 질문·광고 데이터는 모델 서버로 전송하지 않습니다.</p>
+    <p>처음에는 약 769MB의 공개 모델 파일을 자동으로 받아 이 브라우저에 저장합니다. 모델과 질문 해석은 사용자 기기에서 실행되며, 질문·광고 데이터는 모델 호스트로 전송하지 않습니다.</p>
     <p role="status">{status?.message ?? (status?.ready ? "모델 준비 완료" : "모델 준비가 필요합니다.")}</p>
     {status && status.loaded > 0 && <progress aria-label="모델 준비 진행률" value={status.loaded} max={status.total} className="w-full" />}
     <div className="flex flex-wrap gap-2">
@@ -23,8 +23,8 @@ export function BrowserModelTools() {
       <Button type="button" variant="outline" onClick={() => void command("/model/cancel")}>중단</Button>
       <Button type="button" variant="outline" onClick={() => void command("/model/retry")}>다시 시도</Button>
     </div>
-    <details className="mt-3"><summary>모델 파일 가져오기</summary>
-      <p>자동 받기를 사용할 수 없다면 <a href="https://github.com/snjnpark/kr-ads-qa-models/releases/tag/model-conditions-v1" target="_blank" rel="noreferrer">배포 모델 파일 7개</a>를 받은 뒤 함께 선택하세요. 파일의 버전과 무결성을 확인해 이 브라우저에 보관합니다.</p>
+    <details className="mt-3"><summary>고급: 모델 파일 직접 가져오기</summary>
+      <p>자동 다운로드가 차단된 환경에서만 사용하세요. <a href="https://huggingface.co/convaiinnovations/laya/tree/7b928d828b7b0e022f929d9bd2e44165aa270148/multilingual" target="_blank" rel="noreferrer">원천 모델의 model.safetensors·토크나이저 2개</a>와 <a href="https://github.com/snjnpark/kr-ads-qa-models/releases/tag/model-lora-colab-v1" target="_blank" rel="noreferrer">추가 학습 파일 4개</a>를 함께 선택하세요. 버전과 무결성을 확인해 이 브라우저에 보관하며 서버로 업로드하지 않습니다.</p>
       <input aria-label="모델 파일 선택" type="file" multiple onChange={event => { const files = Array.from(event.target.files ?? []); if (files.length) void command("/model/import", { files }); event.target.value = ""; }} />
     </details>
     {message && <p role="status">{message}</p>}

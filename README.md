@@ -37,21 +37,13 @@ Vercel에서는 이 저장소를 Import하고 Next.js, Node.js 24.x, 빌드 명�
 
 ## 모델 준비
 
-별도 AI API 키는 필요하지 않습니다. 원본 학습 모델 약 **1.35GB**와 브라우저 메모리·저장 공간이 필요합니다. 최신 데스크톱 Chromium에서 실제 WASM 실행을 검증했습니다. 준비 후 공개 모델만 CacheStorage/OPFS에 보관하고 재실행 때 크기·SHA-256을 다시 확인합니다.
+별도 AI API 키나 모델 파일 수동 준비는 필요하지 않습니다. 첫 자연어 사용 또는 **설정 → 모델 실행 → 모델 준비**에서 약 **769MB**를 자동 다운로드합니다. 원천 모델·토크나이저는 [고정 Hugging Face 원본](https://huggingface.co/convaiinnovations/laya/tree/7b928d828b7b0e022f929d9bd2e44165aa270148/multilingual)에서 브라우저가 직접 받고, LoRA·학습 헤드·그래프는 별도로 이 웹사이트에서 받습니다. 원본 가중치는 병합하거나 미러링하지 않습니다.
 
-현재 GitHub Release는 브라우저 자동 다운로드에 필요한 CORS 헤더를 제공하지 않습니다. **설정 → 모델 실행**에서 [고정 모델 릴리스](https://github.com/snjnpark/kr-ads-qa-models/releases/tag/model-conditions-v1)의 다음 7개 파일을 다운로드한 뒤 함께 선택해 가져오세요. 파일은 서버에 업로드하지 않습니다.
+모든 파일의 크기·SHA-256을 확인하고 공개 모델만 브라우저 CacheStorage/OPFS에 보관합니다. 같은 주소에서 다시 실행하면 저장한 파일을 재검증해 사용합니다. 질문·광고 데이터·API 키를 모델 호스트로 보내지 않습니다. 최신 데스크톱 Chromium의 WASM 실행을 검증했으며, 최초 준비에는 충분한 브라우저 메모리·저장 공간과 인터넷 연결이 필요합니다. 다운로드는 설정에서 중단·다시 시도할 수 있습니다. 브라우저가 저장을 허용하지 않으면 캐시 경고를 표시합니다.
 
-```text
-laya.onnx
-laya_config.json
-tokenizer--tokenizer.json
-tokenizer--tokenizer_config.json
-model.onnx.data
-condition-head.onnx
-candidate-manifest.json
-```
+셀프 호스트와 Vercel 빌드는 [고정 추가 학습 릴리스](https://github.com/snjnpark/kr-ads-qa-models/releases/tag/model-lora-colab-v1)의 공개 파일 4개(약 90MB)를 검증해 정적 파일로 준비합니다. 원천 모델·토크나이저는 빌드 서버가 받지 않습니다. 생성 모델 파일은 Git·소스 업로드·서버 함수 번들에서 제외하며, 빌드 산출물에서 정적 파일로 제공합니다. WASM 실행 파일도 고정 npm 의존성에서 같은 출처로 준비합니다.
 
-자동 준비를 제공하려면 같은 파일을 공개 CORS 호스트에 올리고 **빌드 전에** `NEXT_PUBLIC_LAYA_MODEL_BASE_URL`을 지정합니다. 파일 내용은 고정된 해시와 일치해야 합니다. 모델은 광고 중계 서버를 통해 다운로드하지 않습니다. WASM 실행 파일은 고정 npm 의존성에서 준비해 같은 출처로 제공합니다.
+운영자가 별도 정적 호스트를 쓰는 경우에만 빌드 전 `NEXT_PUBLIC_LAYA_MODEL_BASE_URL`을 설정합니다. 이 설정은 추가 학습 파일 4개에만 적용되고 원천 URL은 바꾸지 않습니다. 기본 자동 다운로드가 차단된 환경에서는 설정의 고급 파일 가져오기를 사용할 수 있습니다. 파일을 서버에 업로드하지 않습니다.
 
 ## 지원 범위와 사용 방법
 
@@ -75,4 +67,4 @@ Meta, 네이버 검색광고, Google Ads, 카카오모먼트, 카카오 프리�
 
 ## 라이선스
 
-소스는 [MIT License](LICENSE)입니다. 원천 모델은 [Laya Multilingual 모델 카드](https://huggingface.co/convaiinnovations/laya-multilingual/blob/main/README.md)의 Apache-2.0 조건을 따릅니다. 외부 라이브러리와 매체 자산에는 각 권리자의 조건이 적용됩니다. [자산 출처](NOTICE.md)도 확인하세요.
+소스는 [MIT License](LICENSE)입니다. 원천 Laya 모델과 분리 학습 자산은 Apache-2.0 조건과 [모델 출처·변경 고지](public/LAYA_MODEL_NOTICE.txt)를 함께 제공합니다. 외부 라이브러리와 매체 자산에는 각 권리자의 조건이 적용됩니다. [자산 출처](NOTICE.md)도 확인하세요.

@@ -157,7 +157,7 @@ export default function SettingsPage({ accounts, onRefresh }: { accounts: Accoun
             </section>}
             {section === "model" && <section className="settings-panel" id="settings-model" aria-label="모델 실행 설정">
               <div className="settings-panel-heading"><span className="settings-section-icon"><Cpu size={20} /></span><div><h2>모델 실행</h2><p>한국어 질문을 조회 조건으로 해석하는 로컬 모델의 실행 방식입니다.</p></div></div>
-              <div className="settings-model-info"><span className="settings-eyebrow">기본 배포 모델</span><h3>광고 설정 질문에 맞춘 학습 모델</h3><p>공개 모델 파일을 준비하면 이후 저장된 파일을 사용합니다. 질문 해석은 이 브라우저에서 실행합니다.</p><span>약 1.35GB · 별도 AI API 키 불필요</span></div><BrowserModelTools />
+              <div className="settings-model-info"><span className="settings-eyebrow">기본 배포 모델</span><h3>광고 설정 질문에 맞춘 학습 모델</h3><p>공개 모델을 자동으로 받아 저장하고 다음 실행부터 재사용합니다. 질문 해석은 이 브라우저에서 실행합니다.</p><span>약 769MB · 별도 AI API 키 불필요</span></div><BrowserModelTools />
               <fieldset disabled={!!busy} className="settings-model-options"><label className="settings-switch-row"><span><strong>앱 시작 시 모델 미리 불러오기</strong><small>첫 질문의 대기를 줄입니다. 앱 시작 시간과 메모리 사용량이 늘어날 수 있습니다.</small></span><Checkbox aria-label="앱 시작 시 모델 미리 불러오기" checked={draft.preload_model} onCheckedChange={checked => change("preload_model", checked === true)} /></label>
                 <details className="settings-advanced"><summary>고급 실행 설정 <ChevronRight size={15} /></summary><p>기본값 사용을 권장합니다. 변경한 값은 페이지를 새로고침하면 적용됩니다.</p><div className="settings-fields"><NumberField name="semantic_threshold" draft={draft} change={change} /><NumberField name="batch_size" draft={draft} change={change} /></div></details>
               </fieldset>

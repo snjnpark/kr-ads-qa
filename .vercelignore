@@ -23,6 +23,8 @@ playwright-report
 .playwright-cli
 .next-test
 node_modules
+public/models
+.laya-model-downloads
 policies/local
 src/lib/mock-datasets.ts
 src/server/test-disabled.ts

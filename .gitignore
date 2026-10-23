@@ -77,4 +77,6 @@ desktop.ini
 
 # Generated from the pinned npm dependency by the production build.
 /public/onnxruntime/
+/public/models/
+/.laya-model-downloads/
 /.vercel/

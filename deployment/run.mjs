@@ -7,7 +7,11 @@ if (!["dev", "build", "start"].includes(command)) throw new Error("Expected dev,
 process.env.LAYA_BUILD_TARGET = "production";
 process.env.NEXT_PUBLIC_LAYA_TEST_MODE = "0";
 process.env.NEXT_PUBLIC_LAYA_LOCAL_SWITCH = "0";
-if (command !== "start") await import("./prepare-runtime.mjs");
+if (command !== "start") {
+  await import("./prepare-runtime.mjs");
+  const { prepareModelAssets } = await import("./prepare-model.mjs");
+  await prepareModelAssets();
+}
 const require = createRequire(import.meta.url);
 const child = spawn(process.execPath, [require.resolve("next/dist/bin/next"), command, ...args], { stdio: "inherit", env: process.env });
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => child.kill(signal));

@@ -7,7 +7,7 @@ const contentSecurityPolicy = [
   "default-src 'self'", "base-uri 'self'", "object-src 'none'", "frame-ancestors 'none'", "form-action 'self'",
   `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "font-src 'self' data:", "worker-src 'self' blob:",
-  `connect-src 'self' https://graph.facebook.com https://googleads.googleapis.com https://apis.moment.kakao.com https://kapi.kakao.com https://github.com https://release-assets.githubusercontent.com https://objects.githubusercontent.com ${modelOrigin}${process.env.NODE_ENV === "development" ? " ws: wss:" : ""}`,
+  `connect-src 'self' https://graph.facebook.com https://googleads.googleapis.com https://apis.moment.kakao.com https://kapi.kakao.com https://huggingface.co https://*.hf.co ${modelOrigin}${process.env.NODE_ENV === "development" ? " ws: wss:" : ""}`,
 ].join("; ");
 const nextConfig: NextConfig = {
   distDir: testBuild ? ".next-test" : ".next",
@@ -22,9 +22,9 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [],
   poweredByHeader: false,
   turbopack: { root: process.cwd(), resolveAlias: { "@browser-runtime": testBuild ? "./testing/browser-runtime.ts" : "./src/browser/runtime-factory.ts" } },
-  outputFileTracingExcludes: { "/*": ["./data/**/*", "./output/**/*", "./policies/local/**/*", "./config/**/*", "./.env*", "./.git/**/*", "./.playwright-cli/**/*", ...(testBuild ? [] : ["./testing/**/*"]), "./tests-ts/**/*", "./tests-integration/**/*", "./e2e/**/*", "./scripts/**/*", "./docs/**/*", "./benchmarks/**/*", "./src/server/api.ts", "./src/server/application.ts", "./src/server/ai.ts", "./src/server/storage.ts", "./src/server/credentials.ts", "./node_modules/@playwright/**/*", "./node_modules/onnxruntime-node/**/*", "./node_modules/@napi-rs/**/*"] },
+  outputFileTracingExcludes: { "/*": ["./public/models/**/*", "./.laya-model-downloads/**/*", "./data/**/*", "./output/**/*", "./policies/local/**/*", "./config/**/*", "./.env*", "./.git/**/*", "./.playwright-cli/**/*", ...(testBuild ? [] : ["./testing/**/*"]), "./tests-ts/**/*", "./tests-integration/**/*", "./e2e/**/*", "./scripts/**/*", "./docs/**/*", "./benchmarks/**/*", "./src/server/api.ts", "./src/server/application.ts", "./src/server/ai.ts", "./src/server/storage.ts", "./src/server/credentials.ts", "./node_modules/@playwright/**/*", "./node_modules/onnxruntime-node/**/*", "./node_modules/@napi-rs/**/*"] },
   logging: false,
-  async headers() { return [{ source: "/:path*", headers: [{ key: "Content-Security-Policy", value: contentSecurityPolicy }, { key: "Referrer-Policy", value: "no-referrer" }, { key: "X-Content-Type-Options", value: "nosniff" }, { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" }] }]; },
+  async headers() { return [{ source: "/:path*", headers: [{ key: "Content-Security-Policy", value: contentSecurityPolicy }, { key: "Referrer-Policy", value: "no-referrer" }, { key: "X-Content-Type-Options", value: "nosniff" }, { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" }] }, { source: "/models/laya-lora-r4-colab-v1/:path*", headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }] }]; },
   outputFileTracingIncludes: {},
 };
 

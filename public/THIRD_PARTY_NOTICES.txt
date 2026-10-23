@@ -5,6 +5,12 @@ components. The following licenses and upstream notices accompany their public
 JavaScript/WASM distribution. Public model weights retain their own upstream
 model terms.
 
+Separated Laya model delivery: the original multilingual safetensors and
+tokenizer files are downloaded directly by the browser from the pinned upstream
+revision. Application-specific LoRA and learned decision heads, with a separate
+ONNX graph, are distributed as public static assets. See LAYA_MODEL_NOTICE.txt
+for upstream provenance, the modification notice, and the Apache-2.0 license.
+
 ==============================================================================
 @receptron/laya 0.2.0 — adapted choice sequence and inference policy
 Source: https://github.com/receptron/laya
