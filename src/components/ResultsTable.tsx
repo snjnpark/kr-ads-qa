@@ -269,7 +269,30 @@ export default function ResultsTable({
           }
         />
       ) : (
-        <div className="data-table-scroll">
+        <>
+          <ul className="mobile-result-list">
+            {visible.map((row, index) => { const hierarchy = resultHierarchy(row); return <li key={row.key ?? index}>
+              <button type="button" className="mobile-result-open" onClick={() => onSelect(row)}>
+                <strong>{String(row.name || row.id || "이름 미조회")}</strong>
+                <span>{hierarchy.type === "adgroup" && row.platform === "meta" ? "광고 세트" : entityNames[hierarchy.type] || hierarchy.type || "미조회"}</span>
+              </button>
+              <div className="mobile-result-status"><PlatformMark platform={row.platform || ""} />
+                <StatusBadge status={kind === "entities" ? row.status : row.result} />
+              </div>
+              {typeof row.product === "string" && row.product && <p className="mobile-result-account">{row.product}</p>}
+              {kind === "audit" ? <div className="mobile-result-values"><strong>{ruleOptions[String(row.rule_id)] || String(row.reason || row.rule_id || "검사")}</strong><span>{settingValueText(row.actual)} · 기준 {criterionText(row.expected)}</span></div>
+                : kind === "meaning" ? <p className="mobile-result-values">{row.reason || "판단 보류"}</p>
+                : <p className="mobile-result-values">일예산 {money(row.daily_budget, String(row.currency || "통화 미조회"))}{showResult && <StatusBadge status={row.result} />}</p>}
+              <p className="mobile-result-account">{String(row.account_name || (hierarchy.type === "account" ? row.name : "") || row.account_id || row.account || "계정명 미조회")}</p>
+              <details className="mobile-result-identity"><summary>소속·원본 ID</summary><dl>
+                <div><dt>대상 ID</dt><dd>{String(row.id || "ID 미조회")}</dd></div>
+                <div><dt>계정 ID</dt><dd>{String(row.account_id || row.account || (hierarchy.type === "account" ? row.id : "") || "ID 미조회")}</dd></div>
+                <div><dt>캠페인</dt><dd><Identity {...hierarchy.campaign} /></dd></div>
+                <div><dt>광고그룹·광고 세트</dt><dd><Identity {...hierarchy.group} /></dd></div>
+              </dl></details>
+            </li>; })}
+          </ul>
+        <div className="data-table-scroll desktop-result-table">
           <Table style={{ minWidth: 1280 }}>
             <TableHeader>
               <TableRow>
@@ -381,6 +404,7 @@ export default function ResultsTable({
             </TableBody>
           </Table>
         </div>
+        </>
       )}
       {pages > 1 && (
         <div className="table-footer">

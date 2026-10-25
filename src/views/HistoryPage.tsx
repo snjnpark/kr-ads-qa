@@ -197,59 +197,58 @@ export default function HistoryPage({
           : label,
     };
   });
+  const saveSnapshot = () =>
+    void action("snapshot", async (isCurrent, signal) => {
+      const saved = await api<Snapshot>("/snapshots", {
+        method: "POST",
+        body: { ...scope, force: true },
+        signal,
+      });
+      let items: Snapshot[];
+      try {
+        items = await api<Snapshot[]>("/snapshots", { signal });
+      } catch {
+        if (!isCurrent()) return;
+        items = [
+          saved,
+          ...snapshots.filter(
+            (item) => item.snapshot_id !== saved.snapshot_id,
+          ),
+        ];
+        setError(
+          "현재 설정은 저장했습니다. 저장 목록을 새로고침해 주세요.",
+        );
+      }
+      if (!isCurrent()) return;
+      setSnapshots(items);
+      setAfter(saved.snapshot_id);
+      setBefore(
+        items.find(
+          (item) =>
+            item.snapshot_id === after &&
+            item.snapshot_id !== saved.snapshot_id,
+        )?.snapshot_id ??
+          items.find((item) => item.snapshot_id !== saved.snapshot_id)
+            ?.snapshot_id ??
+          "",
+      );
+      setReport(null);
+      onRefresh?.();
+      toast.success(
+        `${saved.entity_count}개 설정을 ${saved.complete ? "저장했습니다." : "부분 저장했습니다. 조회 범위를 확인하세요."}`,
+      );
+    });
   const current = tab === "snapshots" ? report : native;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="변경 이력"
-        description="저장한 설정을 비교하거나 매체의 변경 기록을 조회하세요."
       >
         <LoadingButton
           loading={busy === "snapshot"}
           disabled={!!busy || loading}
-          onClick={() =>
-            void action("snapshot", async (isCurrent, signal) => {
-              const saved = await api<Snapshot>("/snapshots", {
-                method: "POST",
-                body: { ...scope, force: true },
-                signal,
-              });
-              let items: Snapshot[];
-              try {
-                items = await api<Snapshot[]>("/snapshots", { signal });
-              } catch {
-                if (!isCurrent()) return;
-                items = [
-                  saved,
-                  ...snapshots.filter(
-                    (item) => item.snapshot_id !== saved.snapshot_id,
-                  ),
-                ];
-                setError(
-                  "현재 설정은 저장했습니다. 저장 목록을 새로고침해 주세요.",
-                );
-              }
-              if (!isCurrent()) return;
-              setSnapshots(items);
-              setAfter(saved.snapshot_id);
-              setBefore(
-                items.find(
-                  (item) =>
-                    item.snapshot_id === after &&
-                    item.snapshot_id !== saved.snapshot_id,
-                )?.snapshot_id ??
-                  items.find((item) => item.snapshot_id !== saved.snapshot_id)
-                    ?.snapshot_id ??
-                  "",
-              );
-              setReport(null);
-              onRefresh?.();
-              toast.success(
-                `${saved.entity_count}개 설정을 ${saved.complete ? "저장했습니다." : "부분 저장했습니다. 조회 범위를 확인하세요."}`,
-              );
-            })
-          }
+          onClick={saveSnapshot}
         >
           <Camera className="size-4" />
           현재 설정 저장
@@ -268,10 +267,10 @@ export default function HistoryPage({
           </TabsTrigger>
         </TabsList>
         <TabsContent value="snapshots" className="space-y-5">
-          <Card>
+          {!loading && snapshots.length >= 2 && <Card>
             <CardContent className="space-y-5">
-              <div className="grid items-end gap-4 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]">
-                <Field label="이전 시점">
+              <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]">
+                <Field label="이전 시점" className="min-w-0">
                   <Pick
                     disabled={!!busy}
                     value={before}
@@ -285,7 +284,7 @@ export default function HistoryPage({
                   />
                 </Field>
                 <ArrowRight className="mb-2 hidden size-4 text-muted-foreground md:block" />
-                <Field label="이후 시점">
+                <Field label="이후 시점" className="min-w-0">
                   <Pick
                     disabled={!!busy}
                     value={after}
@@ -348,19 +347,15 @@ export default function HistoryPage({
                 </Button>
               </div>
             </CardContent>
-          </Card>
+          </Card>}
           {!report && (loading || snapshots.length < 2) && (
             <Empty
-              title={
-                loading
-                  ? "저장 시점을 불러오는 중입니다…"
-                  : "비교하려면 두 번 이상 저장해야 합니다"
-              }
-              description={
-                !loading
-                  ? "현재 설정을 저장하고, 다음에 다시 저장하면 변경 내용을 비교할 수 있습니다."
-                  : undefined
-              }
+              title={loading ? "저장 시점을 불러오는 중입니다…" : error && !snapshots.length ? "저장 목록을 확인하지 못했습니다" : snapshots.length ? "다음 저장본을 만들면 비교할 수 있습니다" : "첫 저장본을 만들어 주세요"}
+              description={!loading && (!error || snapshots.length > 0) ? "서로 다른 두 시점의 광고 설정을 비교합니다." : undefined}
+              action={!loading && <div className="flex flex-wrap justify-center gap-2">
+                {(!error || snapshots.length > 0) && <LoadingButton loading={busy === "snapshot"} disabled={!!busy} onClick={saveSnapshot}><Camera className="size-4" />{snapshots.length ? "다음 저장본 만들기" : "첫 저장본 만들기"}</LoadingButton>}
+                <Button variant="outline" disabled={!!busy} onClick={() => setReload(value => value + 1)}><RefreshCw className="size-4" />목록 새로고침</Button>
+              </div>}
             />
           )}
           {report && (

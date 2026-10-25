@@ -37,13 +37,13 @@
   --secondary: #eef2f7;
   --secondary-foreground: #45566f;
   --muted: #f5f7fa;
-  --muted-foreground: #78869c;
+  --muted-foreground: #52627a;
   --accent: #edf2ff;
   --accent-foreground: #315cdb;
   --destructive: #c44f4f;
   --border: #e4e9f0;
   --input: #dce3ed;
-  --ring: #8ca6ee;
+  --ring: #315cdb;
 }
 @layer base {
   * {
@@ -57,3 +57,9 @@
     cursor: pointer;
   }
 }
+
+.workspace-shell :is(button, a, input, summary, [role="tab"]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+input::placeholder, textarea::placeholder { color: var(--muted-foreground); opacity: 1; }

@@ -232,8 +232,8 @@ export function Pick({
       onValueChange={onChange}
       disabled={disabled}
     >
-      <SelectTrigger className="w-full" aria-label={label ?? placeholder}>
-        <SelectValue placeholder={placeholder} />
+      <SelectTrigger className="w-full min-w-0" aria-label={label ?? placeholder}>
+        <SelectValue className="min-w-0 truncate" placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
         {options.map((option) => (

@@ -39,7 +39,7 @@
 }
 .workspace-tagline {
   font-size: 12px;
-  color: #78869c;
+  color: var(--muted-foreground);
 }
 .workspace-shell .main-area {
   margin-left: 0;
@@ -156,8 +156,8 @@
 .section-navigation {
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  padding-bottom: 20px;
+  gap: 12px;
+  padding-bottom: 12px;
   border-bottom: 1px solid #e4e9f0;
 }
 .section-intro h1 {
@@ -210,7 +210,7 @@
   gap: 4px;
   height: 58px;
   border-radius: 14px;
-  color: #78869c;
+  color: var(--muted-foreground);
   font-size: 11px;
   font-weight: 550;
 }
@@ -359,4 +359,16 @@
   .bottom-navigation .bottom-tab {
     height: 56px;
   }
+}
+
+.audit-scope-summary { display: grid; gap: 10px; margin-top: 18px; font-size: 13px; }
+.audit-scope-summary > div { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 12px; }
+.audit-scope-summary dt { color: var(--muted-foreground); }
+.audit-scope-summary dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 767px), (pointer: coarse) {
+  .workspace-shell :is([data-slot="select-trigger"], [data-slot="tabs-trigger"], button[data-slot="button"]),
+  .workspace-shell .section-navigation [data-slot="tabs-trigger"] { min-height: 44px; }
+  .workspace-shell button[data-size="icon-sm"] { min-width: 44px; }
+  .section-navigation [data-slot="tabs-list"] { height: auto; }
+  .audit-scope-summary > div { grid-template-columns: minmax(0, 1fr); gap: 3px; }
 }

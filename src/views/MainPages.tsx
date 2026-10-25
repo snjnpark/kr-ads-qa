@@ -45,6 +45,7 @@ import ComparisonTable from "@/components/ComparisonTable";
 import { HistoryResults } from "@/views/HistoryPage";
 import { Notice } from "@/components/secondary/WorkspaceParts";
 import { api } from "@/lib/api";
+import { scopeDescription, overviewScopeData } from "@/lib/overview-summary";
 import { semanticOutcome, unknownResultTitle } from "@/lib/evidence";
 import type { AppState, DataRow, Result, Scope } from "@/contracts/api";
 
@@ -63,22 +64,6 @@ function examplesFor(state: AppState) {
         questionExamples[3],
       ]
     : questionExamples;
-}
-function scopeDescription(scope: Scope, state: AppState) {
-  const media = scope.platforms?.length
-    ? scope.platforms
-        .map((platform) => platforms[platform] ?? platform)
-        .join(" · ")
-    : "전체 매체";
-  const accounts = scope.accounts?.map(
-    (value) =>
-      state.accounts.find(
-        (account) =>
-          value === `${account.platform}/${account.account_id}` ||
-          value === account.account_id,
-      )?.name ?? value,
-  );
-  return `${media} · ${accounts?.length ? accounts.join(" · ") : "전체 계정"}`;
 }
 function Loading({ text }: { text: string }) {
   return (
@@ -235,11 +220,7 @@ export function AskPage({
       <div className="search-entry">
         {!submitted && (
           <header className="search-intro">
-            <span className="search-kicker">광고 설정을 한눈에</span>
-            <h1>
-              kr-ads-qa
-            </h1>
-            <p>광고 설정, 무엇이 궁금하세요?</p>
+            <h1>광고 설정 검색</h1>
           </header>
         )}
         {submitted && (
@@ -303,11 +284,6 @@ export function AskPage({
           </Button>
         </form>
         <div className="search-hint" id="search-keyboard-hint">
-          <span>
-            {submitted
-              ? "질문을 바꿔 다시 검색할 수 있어요"
-              : "선택한 매체와 계정에서 찾아드려요"}
-          </span>
           <span className="keyboard-hint">
             Enter로 검색 · Shift + Enter로 줄바꿈
           </span>
@@ -318,7 +294,6 @@ export function AskPage({
             aria-label="질문 예시"
             aria-hidden={text.length > 0}
           >
-            <p>이런 질문으로 시작해 보세요</p>
             {examplesFor(state).slice(0, 3).map((question) => (
               <Button
                 type="button"
@@ -342,7 +317,6 @@ export function AskPage({
           <>
             <div className="query-summary">
               <div>
-                <span className="eyebrow">검색 결과</span>
                 <h2>{submitted}</h2>
                 <p>{result.message}</p>
               </div>
@@ -581,7 +555,7 @@ export function AuditPage({
   }
   return (
     <>
-      <PageHeader title="전체 QA">
+      <PageHeader title="검사">
         <Button
           disabled={Boolean(busy) || !selectedPolicy || (selectedPolicy.evaluation_mode === "conditions" && !ruleCount)}
           onClick={() => execute("audit")}
@@ -593,7 +567,7 @@ export function AuditPage({
           )}
           {busy === "audit"
             ? "광고 설정 검사 중"
-            : "전체 QA 실행"}
+            : "검사 실행"}
         </Button>
       </PageHeader>
       <Card className="audit-configuration">
@@ -604,7 +578,7 @@ export function AuditPage({
                 <CheckCheck size={19} />
               </span>
               <div>
-                <h2>검사 범위</h2>
+                <h2>적용 정책</h2>
                 <p>
                   {selectedPolicy ? `${selectedPolicy.name} · 버전 ${selectedPolicy.version} · 활성 조건 ${ruleCount}개${selectedPolicy.evaluation_mode ? "" : " + 기본 검사"}` : "운영 정책을 선택하세요"}
                 </p>
@@ -621,7 +595,14 @@ export function AuditPage({
               </Button>
             </div>
           </div>
-          <p className="fine-print mt-4">선택한 정책의 적용 매체·계정 범위와 현재 조회 범위가 겹치는 광고를 검사합니다. 저장 전 편집 내용은 적용되지 않습니다.</p>
+          <dl className="audit-scope-summary">
+            <div><dt>조회 범위</dt><dd>{scopeDescription(scope, state.accounts, platforms)}</dd></div>
+            <div><dt>정책과 겹치는 조회 계정</dt><dd>{selectedPolicy ? (() => {
+              const accounts = overviewScopeData(state, scope).accounts.filter(account => selectedPolicy.platforms.includes(account.platform as typeof selectedPolicy.platforms[number]) && (!selectedPolicy.account_ids.length || selectedPolicy.account_ids.includes(account.account_id)));
+              return accounts.length ? accounts.map(account => `${platforms[account.platform] ?? account.platform} · ${account.name}`).join(" / ") : "조회된 계정 없음";
+            })() : "정책을 선택하세요"}</dd></div>
+          </dl>
+          <p className="fine-print mt-3">저장된 정책과 겹치는 범위만 검사합니다. 미저장 편집은 적용되지 않습니다.</p>
         </CardContent>
       </Card>
       <div className="audit-secondary-actions">
@@ -682,7 +663,7 @@ export function AuditPage({
               {resultKind === "anomalies" && <p>{result.message}</p>}
               <p className="fine-print mt-2">
                 {result.selected_policy && <span>적용 정책 · {result.selected_policy.name} v{result.selected_policy.version}<br /></span>}
-                검사 당시 범위 · {scopeDescription(resultScope, state)}
+                검사 당시 범위 · {scopeDescription(resultScope, state.accounts, platforms)}
                 {resultKind === "history"
                   ? " · 현재 선택 범위와 다를 수 있습니다."
                   : ""}

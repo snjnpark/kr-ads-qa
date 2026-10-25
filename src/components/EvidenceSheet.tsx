@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TEST_MODE } from "@/lib/runtime";
 import { Loader2 } from "lucide-react";
 import {
@@ -100,6 +100,8 @@ export default function EvidenceSheet({
   const [entity, setEntity] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false),
     [error, setError] = useState("");
+  const opener = useRef<HTMLElement | null>(null),
+    dismissed = useRef(false);
   const currentEntity = Boolean(
     row?.key && /^(meta|naver|kakao|kakao_keyword|google)\//.test(row.key),
   );
@@ -175,10 +177,27 @@ export default function EvidenceSheet({
     <Sheet
       open={Boolean(row)}
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open) {
+          dismissed.current = true;
+          onClose();
+        }
       }}
     >
-      <SheetContent className="evidence-sheet sm:max-w-xl">
+      <SheetContent
+        className="evidence-sheet sm:max-w-xl"
+        onOpenAutoFocus={() => {
+          opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          dismissed.current = false;
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const target = opener.current;
+          if (dismissed.current && target?.isConnected && target.getClientRects().length && !target.closest("[inert]"))
+            target.focus({ preventScroll: true });
+          opener.current = null;
+          dismissed.current = false;
+        }}
+      >
         <SheetHeader>
           <SheetTitle>{title}</SheetTitle>
           <SheetDescription>

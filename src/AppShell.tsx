@@ -47,7 +47,7 @@ import { AD_PRODUCTS } from "@/lib/ad-products";
 const navigation = [
   { id: "ask", path: "/", label: "검색", icon: Search, tab: "search" },
   { id: "overview", path: "/overview", label: "요약", icon: LayoutDashboard, tab: "status" },
-  { id: "audit", path: "/audit", label: "전체 QA", icon: ClipboardCheck, tab: "status" },
+  { id: "audit", path: "/audit", label: "검사", icon: ClipboardCheck, tab: "status" },
   { id: "history", path: "/history", label: "변경 이력", icon: History, tab: "status" },
   { id: "policies", path: "/policies", label: "운영 정책", icon: BookOpen, tab: "rules" },
   { id: "settings", path: "/settings", label: "설정", icon: Settings2, tab: "settings" },
@@ -413,12 +413,6 @@ function Workspace() {
                 {sections.length > 1 && (
                   <Tabs value={page} onValueChange={navigate} activationMode="manual" className={`section-tabs ${active.tab === "status" ? "status-workspace" : ""}`}>
                     <div className="section-navigation">
-                      <div className="section-intro">
-                        <h1>{active.tab === "status" ? "현황" : "규칙"}</h1>
-                        <p>{active.tab === "status"
-                          ? "검사 결과를 확인하고, 필요한 조치를 이어가세요."
-                          : "광고 설정을 검사할 기준을 만들고 계정에 적용하세요."}</p>
-                      </div>
                       <TabsList aria-label={active.tab === "status" ? "현황 메뉴" : "규칙 메뉴"}>
                         {sections.map((item) => (
                           <TabsTrigger key={item.id} value={item.id} disabled={syncing}>

@@ -1,5 +1,22 @@
+import { productLabel } from "./ad-products";
 import { POLICY_PLATFORMS } from "./policy-conditions";
 import type { Account, AppState, AuditRun, DataRow, Scope } from "../contracts/api";
+
+export function scopeDescription(scope: Scope, accounts: readonly Account[], names: Record<string, string>): string {
+  const media = scope.platforms?.length ? scope.platforms.map(platform => names[platform] ?? platform).join(" · ") : "전체 매체";
+  const selected = scope.accounts?.map(value => {
+    const candidates = new Map(accounts.filter(account =>
+      (value === `${account.platform}/${account.account_id}` || value === account.account_id) &&
+      (!scope.platforms?.length || scope.platforms.includes(account.platform)),
+    ).map(account => [`${account.platform}/${account.account_id}`, account]));
+    return candidates.size === 1 ? [...candidates.values()][0].name || value : value;
+  });
+  const products = scope.products?.map(value => {
+    const [platform, code] = value.split(":");
+    return code ? `${names[platform] ?? platform} ${productLabel(platform, code)}` : value;
+  });
+  return `${media} · ${selected?.length ? selected.join(" · ") : "전체 계정"}${products?.length ? ` · ${products.join(" · ")}` : ""}`;
+}
 
 const verdicts = ["FAIL", "WARNING", "REVIEW", "UNKNOWN", "PASS", "NOT_APPLICABLE"] as const;
 const attentionVerdicts: readonly string[] = verdicts.slice(0, 4);

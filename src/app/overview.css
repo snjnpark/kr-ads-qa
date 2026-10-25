@@ -206,3 +206,12 @@
 .track-not_applicable {
   background: #e6ebf3;
 }
+
+.overview-preview { margin-top: 22px; }
+.overview-preview-list { list-style: none; padding: 0; margin: 0; }
+.overview-preview-list li + li { border-top: 1px solid var(--border); }
+.overview-preview-list button { display: flex; width: 100%; min-height: 64px; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; text-align: left; }
+.overview-preview-list button > span:first-child { display: grid; min-width: 0; gap: 4px; }
+.overview-preview-list strong { overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
+.overview-preview-list small { color: var(--muted-foreground); overflow-wrap: anywhere; }
+.overview-preview-list button:hover strong { color: var(--primary); }
