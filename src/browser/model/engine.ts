@@ -32,7 +32,7 @@ export class BrowserLayaEngine {
   }
   get source() { return "laya"; }
   get modelVersion() { return MODEL_VERSION; }
-  get modelStatus() { return { ...this.progress, ready: this.ready, model_version: this.modelVersion }; }
+  get modelStatus() { return { ...this.progress, ready: this.ready, loading: [...this.pending.values()].some(request => request.method === "load"), model_version: this.modelVersion }; }
   subscribe(listener: (value: ModelProgress) => void) { this.listeners.add(listener); listener(this.progress); return () => { this.listeners.delete(listener); }; }
   private emit(progress: ModelProgress) { this.progress = progress; if (progress.stage === "ready") this.ready = true; for (const listener of this.listeners) { try { listener(progress); } catch { /* A view listener must not interrupt inference. */ } } }
   private ensureWorker() {
