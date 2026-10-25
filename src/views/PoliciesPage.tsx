@@ -36,7 +36,8 @@ export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scop
   const [text, setText] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const request = useRef<AbortController | null>(null);
-  const dirty = policyDocument(policy) !== baseline || !!text.trim();
+  const hasDraft = !!text.trim() || !!preview;
+  const dirty = policyDocument(policy) !== baseline || hasDraft;
   const legacy = policy.evaluation_mode !== "conditions";
   const locked = !!busy || legacy || historical;
   const active = policy.rules.filter(rule => rule.enabled && (!rule.platforms.length || rule.platforms.some(platform => policy.platforms.includes(platform))));
@@ -78,7 +79,8 @@ export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scop
       if (request.current === pending) { request.current = null; setBusy(""); }
     }
   }
-  function edit(next: Policy) { setPolicy(next); setPreview(null); }
+  function edit(next: Policy) { setPolicy(next); }
+  function discardDraft() { setText(""); setPreview(null); }
   function replace(next: Policy, id: string, previous = false) {
     const document = clean(next);
     setPolicy(document); setBaseline(policyDocument(document)); setSelected(id);
@@ -111,7 +113,7 @@ export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scop
     void perform("versions", signal => api<Policy[]>(`/policies/${encodeURIComponent(selected)}/versions`, { signal }), setVersions);
   }
   function save() {
-    if (locked || !dirty || !policy.name.trim() || !policy.platforms.length || text.trim()) return;
+    if (locked || !dirty || !policy.name.trim() || !policy.platforms.length || hasDraft) return;
     const document = { ...policy, name: policy.name.trim() };
     void perform("save", signal => api<Policy>(selected ? `/policies/${encodeURIComponent(selected)}` : "/policies", {
       method: selected ? "PUT" : "POST", body: { yaml: policyDocument(document) }, signal,
@@ -135,11 +137,12 @@ export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scop
   }
   function renderPreset(preset: RulePreset) {
     const rule = categoryRules.find(item => matchesPreset(item, preset));
+    const inherits = section !== "common" && COMMON_PRESETS.includes(preset) && policy.rules.some(item => item.enabled && !item.platforms.length && matchesPreset(item, preset));
     return <div className={`policy-criterion ${rule?.enabled ? "is-enabled" : ""}`} key={preset.id}>
       <label className="policy-criterion-heading">
         <Checkbox disabled={locked} checked={rule?.enabled ?? false} onCheckedChange={checked => toggle(preset, checked === true)} aria-label={`${preset.label} 사용`} />
         <span><strong>{preset.label}</strong><small>{preset.description}</small></span>
-        <span className="policy-enabled-label">{rule?.enabled ? "검사" : section !== "common" && COMMON_PRESETS.includes(preset) ? "공통 값 사용" : "사용 안 함"}</span>
+        {!rule?.enabled && inherits && <span className="policy-inheritance-label">공통 값 사용</span>}
       </label>
       {rule?.enabled && <div className="policy-criterion-fields">
         <Field label="검사 대상"><Pick label={`${preset.label} 검사 대상`} value={rule.entity} disabled={locked} onChange={entity => updateRule({ ...rule, entity })} options={Object.entries(entityNames).map(([value, label]) => ({ value, label: value === "adgroup" ? "광고그룹·광고 세트" : label }))} /></Field>
@@ -158,7 +161,7 @@ export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scop
     <PageHeader title="운영 정책" description="전체 QA에서 사용할 검사 기준을 정하세요.">
       <Button variant="outline" disabled={!!busy} onClick={openLibrary}><FolderOpen />정책 불러오기</Button>
       <Button variant="outline" disabled={!!busy} onClick={create}><Plus />새 정책</Button>
-      <Button disabled={locked || !dirty || !policy.name.trim() || !policy.platforms.length || !!text.trim()} onClick={save}>{busy === "save" ? <Loader2 className="animate-spin" /> : <Save />}정책 저장</Button>
+      <Button disabled={locked || !dirty || !policy.name.trim() || !policy.platforms.length || hasDraft} onClick={save}>{busy === "save" ? <Loader2 className="animate-spin" /> : <Save />}정책 저장</Button>
     </PageHeader>
     {error && <Notice tone="error">{error}</Notice>}
     {(legacy || historical) && <Notice tone="warning">
@@ -171,7 +174,6 @@ export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scop
       </div>
     </Notice>}
     <section className="policy-identity" aria-label="정책 정보">
-      <div className="policy-section-number">01</div>
       <div className="policy-identity-form">
         <div className="policy-section-heading"><h2>정책 이름과 적용 범위</h2><span className={dirty ? "policy-draft-badge" : "policy-saved-badge"}>{dirty ? "저장 전" : selected ? `저장됨 · v${policy.version}` : "새 정책"}</span></div>
         <Field label="정책 이름"><Input aria-label="정책 이름" placeholder="예: 브랜드 A 기본 운영 기준" value={policy.name} disabled={locked} maxLength={200} onChange={event => edit({ ...policy, name: event.target.value })} /></Field>
@@ -196,16 +198,14 @@ export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scop
     </section>
     <div className="policy-workbench">
       <nav className="policy-sections" aria-label="정책 조건 구분">
-        <p>02 · 검사 기준</p>
         {(["common", ...POLICY_PLATFORMS] as Section[]).map(id => <button type="button" key={id} aria-pressed={section === id} disabled={!!busy || (id !== "common" && !policy.platforms.includes(id))} onClick={() => setSection(id)}>
-          {id === "common" ? <span className="policy-common-label"><Layers3 size={16} />공통 기준</span> : <PlatformMark platform={id} withLabel={false} />}
-          <span className="policy-section-count">{policy.rules.filter(rule => rule.enabled && (id === "common" ? !rule.platforms.length : rule.platforms.includes(id))).length}</span>
+          {id === "common" ? <span className="policy-common-label"><Layers3 size={16} />공통 기준</span> : <span className="policy-service-label"><PlatformMark platform={id} withLabel={id === "kakao" || id === "kakao_keyword"} /></span>}
           <ChevronRight size={14} />
         </button>)}
       </nav>
       <div className="policy-editor-body">
         <section className="policy-condition-panel" aria-label={`${section === "common" ? "공통" : platformNames[section]} 검사 기준`}>
-          <div className="policy-panel-heading"><div><h2>{section === "common" ? "공통 검사 기준" : `${platformNames[section]} 전용 기준`}</h2><p>{section === "common" ? "선택한 모든 매체에 적용할 항목을 켜세요." : "이 매체에만 필요한 기준입니다. 지정하지 않은 공통 기준은 그대로 적용됩니다."}</p></div><span>{categoryRules.filter(rule => rule.enabled).length}개 사용</span></div>
+          <div className="policy-panel-heading"><div><h2>{section === "common" ? "공통 검사 기준" : `${platformNames[section]} 전용 기준`}</h2>{section !== "common" && <p>별도로 지정하지 않은 항목은 공통 기준을 적용합니다.</p>}</div></div>
           {section === "common" ? COMMON_PRESETS.map(renderPreset) : <>
             {MEDIA_PRESETS[section].map(renderPreset)}
             <details className="policy-overrides"><summary>이 매체의 공통 기준 별도 설정 <span>예산·상태·일정</span></summary><p>동일한 항목과 검사 대상에 지정한 값이 공통 값보다 우선합니다.</p>{COMMON_PRESETS.map(renderPreset)}</details>
@@ -221,9 +221,9 @@ export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scop
           </div>)}</div>}
         </section>
         <section className="policy-natural-draft" aria-label="자연어 조건 초안">
-          <div className="policy-panel-heading"><div><h2><Sparkles size={18} />자연어로 기준 추가</h2><p>필요한 조건을 한 문장으로 적고 초안을 확인하세요.</p></div></div>
-          <Textarea aria-label="정책 초안 요청" disabled={locked} value={text} maxLength={2000} onChange={event => { setText(event.target.value); setPreview(null); }} placeholder="예: 메타 캠페인 일예산은 5만원 이하로 운영" />
-          <div className="policy-draft-actions"><small>일예산 · 운영 상태 · 종료일 · 승인 오디언스 / 한 번에 한 조건</small><Button variant="outline" disabled={locked || !text.trim()} onClick={generate}>{busy === "draft" ? <Loader2 className="animate-spin" /> : <Sparkles />}초안 만들기</Button></div>
+          <div className="policy-panel-heading"><h2><Sparkles size={18} />자연어로 기준 추가</h2></div>
+          <Textarea aria-label="정책 초안 요청" aria-describedby={preview ? "policy-draft-next-action" : undefined} disabled={locked} readOnly={!!preview} value={text} maxLength={2000} onChange={event => setText(event.target.value)} placeholder="예: 메타 캠페인 일예산은 5만원 이하로 운영" />
+          <div className="policy-draft-actions"><small id="policy-draft-next-action">{preview ? "초안을 추가하거나 버린 뒤 새 조건을 입력하세요." : "일예산 · 운영 상태 · 종료일 · 승인 오디언스 / 한 번에 한 조건"}</small><div><Button variant="ghost" disabled={locked || (!text && !preview)} onClick={discardDraft}>초안 버리기</Button><Button variant="outline" disabled={locked || !text.trim() || !!preview} onClick={generate}>{busy === "draft" ? <Loader2 className="animate-spin" /> : <Sparkles />}초안 만들기</Button></div></div>
           {preview && <div className="policy-draft-preview"><span>추가할 기준</span><h3>{preview.rule.name}</h3><p>{preview.rule.platforms.length ? preview.rule.platforms.map(platform => platformNames[platform]).join(" · ") : "공통"} · {entityNames[preview.rule.entity]}</p><p>{conditionText(preview.rule.check)}</p>{preview.rule.when && <p>적용 조건: {conditionText(preview.rule.when)}</p>}{preview.notes.map(note => <small key={note}>{note}</small>)}
             <Button disabled={locked || preview.rule.platforms.some(platform => !policy.platforms.includes(platform))} onClick={addPreview}><Plus />검사 기준에 추가</Button>
             {preview.rule.platforms.some(platform => !policy.platforms.includes(platform)) && <small>이 초안의 매체를 위 적용 범위에서 먼저 선택하세요.</small>}
@@ -239,7 +239,7 @@ export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scop
         {selected && <Button variant="outline" disabled={!!busy} onClick={openVersions}><History size={15} />저장 버전 보기</Button>}
       </aside>
     </div>
-    <footer className="policy-save-bar"><div><strong>{historical ? `이전 버전 v${policy.version}` : dirty ? "저장하지 않은 변경이 있습니다" : selected ? `버전 ${policy.version} 저장됨` : "새 정책 작성 중"}</strong><p>{text.trim() ? "초안을 검사 기준에 추가하거나 입력을 비운 뒤 저장하세요." : "저장한 정책을 현황에서 선택하면 전체 QA에 적용됩니다."}</p></div><Button disabled={locked || !dirty || !policy.name.trim() || !policy.platforms.length || !!text.trim()} onClick={save}>{busy === "save" ? <Loader2 className="animate-spin" /> : <Save />}정책 저장</Button></footer>
+    <footer className="policy-save-bar"><div><strong>{historical ? `이전 버전 v${policy.version}` : dirty ? "저장하지 않은 변경이 있습니다" : selected ? `버전 ${policy.version} 저장됨` : "새 정책 작성 중"}</strong><p>{hasDraft ? "초안을 검사 기준에 추가하거나 버린 뒤 저장하세요." : "저장한 정책을 현황에서 선택하면 전체 QA에 적용됩니다."}</p></div><Button disabled={locked || !dirty || !policy.name.trim() || !policy.platforms.length || hasDraft} onClick={save}>{busy === "save" ? <Loader2 className="animate-spin" /> : <Save />}정책 저장</Button></footer>
     <Dialog open={dialog !== null} onOpenChange={open => { if (!busy && !open) setDialog(null); }}><DialogContent className="policy-library-dialog"><DialogHeader><DialogTitle>{dialog === "load" ? "저장된 정책 불러오기" : "저장 버전"}</DialogTitle><DialogDescription>{dialog === "load" ? "불러올 정책을 선택하세요. 새 정책은 이름을 정하고 검사 기준을 저장하면 됩니다." : "검사 당시의 기준을 확인할 수 있습니다. 이전 버전은 조회만 가능합니다."}</DialogDescription></DialogHeader>
       {!!busy && <p className="policy-library-loading"><Loader2 className="animate-spin" size={16} />불러오는 중</p>}
       {error && <Notice tone="error">{error}</Notice>}
