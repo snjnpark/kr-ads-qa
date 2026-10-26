@@ -149,6 +149,14 @@ function commercialAwarenessConflict(state: Record<string, string>) {
     )
   );
 }
+function explicitlyUndecidedObjective(state: Record<string, string>) {
+  return Object.values(state).some((text) => {
+    // Quoted management labels and unfinished quotations do not declare an objective.
+    const unquoted = text.replace(/"[^"]*"|'[^']*'|`[^`]*`|“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』/gu, "\u0000");
+    return !/["'`“‘「『]/u.test(unquoted) &&
+      /(?:^|[\s:：,，;；.!?。！？])주목적(?:을|은|이)?\s*(?:정하지\s*않음|미정(?:임|이다|입니다)?)\s*[.!。！]*$/u.test(unquoted);
+  });
+}
 function containsModelInstruction(state: Record<string, string>) {
   return /ignore\s+(?:(?:all|the|any|previous|above)\s+)*(?:instructions?|prompts?)|이전\s*(?:지시|명령).*무시|(?:always|must)\s+(?:answer|choose|return|output)\s+(?:true|false|branding|purchase|retargeting)|(?:정답|출력|라벨)\s*(?:[:=]|은|는)\s*["']?(?:true|false|branding|purchase|retargeting)/i.test(
     Object.values(state).join(" "),
@@ -474,7 +482,9 @@ async judgeBatch(
             target === "branding" &&
             selected === "true" &&
             commercialAwarenessConflict(state);
+          const objectiveUndecided = axis === "objective" && explicitlyUndecidedObjective(state);
           const uncertain =
+            objectiveUndecided ||
             conflict ||
             selected === "unknown" ||
             new Set(views.map((view) => top(view.scores))).size !== 1 ||
@@ -488,7 +498,9 @@ async judgeBatch(
             this.decision(
               uncertain ? null : selected,
               identity,
-              conflict
+              objectiveUndecided
+                ? "원문에서 현재 주목표의 미확정을 명시해 판단을 보류했습니다."
+                : conflict
                 ? "상품·상표 언급과 거래 행동만으로 인지도 목표를 확인할 수 없어 보류했습니다."
                 : uncertain
                   ? "선택지 순서가 불안정하거나 정보·확신도가 부족해 판단을 보류했습니다."
