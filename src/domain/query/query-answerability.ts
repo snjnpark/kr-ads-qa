@@ -79,18 +79,18 @@ export function analyzeQueryAnswerability(text: string, evidence?: Evidence, con
     if (opposedRelationship || opposedContrast) add("purchase_relationship", "구매 목적과 최적화 설정의 불일치를 확인할지 알려주세요. 일치 대상만의 조회는 지원하지 않습니다.", "clarification");
     else if (mismatchRelationship || /다른/u.test(clean) || /^잘못된(?=\s|$|캠페인|광고)/u.test(predicate)) semantics.push("purchase_mismatch");
   }
-  if ((/브랜딩|브랜드\s*(?:인지도|인지|알리)/u.test(clean) && /목적|의도|설정|해당/u.test(clean)) || /브랜드(?:를)?\s*(?:널리\s*)?알리(?:기\s*위한|려는)/u.test(clean)) {
+  if ((/브랜딩|브랜드\s*(?:인지도|인지|알리)/u.test(clean) && /목적|의도|설정|해당/u.test(clean)) || /브랜드(?:를)?\s*(?:널리\s*)?알리(?:기\s*위한|려는)/u.test(clean) || /운영\s*의도가\s*브랜드를\s*알리는\s*데\s*있는/u.test(clean)) {
     if (/(?:브랜딩|브랜드\s*(?:인지도|인지))\s*(?:(?:목적|의도)(?:이|가|은|는|을|를)?\s*)?(?:아닌|아니|제외|말고)/u.test(clean))
       add("branding_polarity", "브랜딩 목적이 있는 대상의 조회만 지원합니다. 목적 부정 조건을 생략해서 조회할 수 없습니다.", "clarification");
     else semantics.push("branding");
   }
   if (semantics.length > 1) add("multiple_semantics", "확인할 광고 목적을 하나씩 지정해 주세요.", "clarification");
 
-  if (/\b(?:ROAS|CTR|CPC|CPM|CVR|CPA)\b|클릭률|전환율|(?:노출|클릭|구매|전환|도달)(?:당|별)?\s*(?:수|횟수|건수|비용|단가|률|율)|(?:노출|클릭|구매|전환|도달)(?:이|가|은|는)?\s*(?:(?:한\s*(?:번|건)도?|단\s*한\s*(?:번|건)도?)\s*)?(?:0|없|있(?:는|었|던)|발생(?:한|하지\s*않|하지\s*안|하지\s*못))|(?:노출|클릭|구매|전환|도달|효율)(?:이|가|은|는)?\s*(?:낮|적|높|많|좋|나쁜|나쁘)|성과|실적|매출|소진\s*(?:금액|비용)|광고비\s*(?:지출|사용)/iu.test(metrics))
+  if (/\b(?:ROAS|CTR|CPC|CPM|CVR|CPA)\b|클릭률|전환율|(?:노출|클릭|구매|전환|도달)(?:당|별)?\s*(?:수|횟수|건수|비용|단가|률|율)|(?:노출|클릭|구매|전환|도달)(?:이|가|은|는)?\s*(?:(?:한\s*(?:번|건)도?|단\s*한\s*(?:번|건)도?)\s*)?(?:0|없|있(?:는|었|던)|발생(?:한|하지\s*않|하지\s*안|하지\s*못))|(?:노출|클릭|구매|전환|도달|효율)(?:이|가|은|는)?\s*(?:낮|적|높|많|좋|나쁜|나쁘)|성과|실적|매출|소진\s*(?:금액|비용)|광고비\s*(?:지출|사용)|비용(?:이|가|은|는)?\s*(?:많|적|높|낮)/iu.test(metrics))
     add("performance_data", "성과 지표는 현재 질문 조회에서 지원하지 않습니다. 예산·상태 등 광고 설정을 질문해 주세요.", "unsupported", "performance_metrics");
   if (excludedAdProduct(text)) add("excluded_product", "현재 지원하지 않는 광고상품입니다. 지원하는 광고상품의 설정을 질문해 주세요.", "unsupported", "excluded_product");
   if (/(?:광고|캠페인|세트|그룹|키워드|소재|예산|이름)[^.;?!]*(?:삭제|복제|복사|수정|변경|증액|감액|중지|활성화|비활성화)(?:해|하겠|하자|하라|시켜|해\s*주|하(?:여|고)\s*주|\s*부탁)|(?:예산|이름|종료일|상태)[^.;?!]*(?:바꿔|고쳐|올려|내려|늘려|줄여)|(?:캠페인|광고\s*세트|광고\s*그룹|소재)[^.;?!]*(?:새로\s*만들어|지워\s*줘)|(?:광고|캠페인|소재|그룹|세트)[^.;?!]*(?:삭제|복제|복사|수정|변경)한\s*(?:다음|뒤|후)|예산[^.;?!]*(?:원|달러)(?:씩)?\s*넣어\s*(?:주|줘|달라)/u.test(clean) ||
-      /(?:예산|광고|캠페인|그룹|세트|소재|키워드)[^.;?!]*(?:제거해|꺼\s*줘|켜\s*줘|바꿔\s*줘|올려\s*줘|내려\s*줘)|(?:광고|캠페인|예산|이름|계정)[^.;?!]*(?:지우는|복사(?:한|할)|복제(?:한|할)|결제해|변경하는\s*작업|멈추게\s*해|고쳐\s*줘|늘려\s*줘|켜서\s*실행|두\s*배로\s*올려)|이름[^.;?!]*새로\s*붙인\s*후/u.test(clean))
+      /(?:예산|광고|캠페인|그룹|세트|소재|키워드)[^.;?!]*(?:제거해|꺼\s*(?:줘|주세요)|켜\s*(?:줘|주세요)|바꿔\s*줘|올려\s*줘|내려\s*줘)|(?:광고|캠페인|예산|이름|계정)[^.;?!]*(?:지우는|복사(?:한|할)|복제(?:한|할)|결제해|변경하는\s*작업|멈추게\s*해|고쳐\s*줘|늘려\s*줘|켜서\s*실행|두\s*배로\s*올려)|이름[^.;?!]*새로\s*붙인\s*후/u.test(clean))
     add("mutating_action", "광고 설정을 바꾸는 작업은 지원하지 않습니다. 현재 설정 조회와 검수만 가능합니다.", "unsupported", "read_only");
   if (!operations.includes("create_rule") && /(?:광고|캠페인|그룹|세트|소재|키워드)[^.;?!]{0,40}(?:생성|추가|개설|만들어)(?:해)?\s*(?:주|줄|줘|달라)/u.test(clean))
     add("creating_entity", "새 광고 객체를 생성하는 작업은 지원하지 않습니다. 현재 설정 조회와 검수만 가능합니다.", "unsupported", "read_only");
@@ -126,7 +126,7 @@ export function analyzeQueryAnswerability(text: string, evidence?: Evidence, con
     add("unsupported_configuration_field", "기기·지역·입찰·심사 조건은 현재 조회에서 지원하지 않습니다.", "unsupported", "unsupported_condition");
   if (/(?:타겟(?:팅)?\s*)?(?:국가|나라)(?:\s*(?:코드|설정))?(?=$|[\s:：=]|이|가|은|는|을|를|로|에|만)|(?:랜딩|도착|연결|최종|목적지)\s*(?:URL|주소)|\bURL(?=$|[\s:：=]|에|이|가|은|는|을|로|만)/iu.test(clean))
     add("unrepresentable_filter_field", "국가·랜딩 URL 조건은 현재 검색에서 지원하지 않습니다. 해당 조건을 생략해서 조회할 수 없습니다.", "unsupported", "unsupported_condition");
-  if ([...clean.matchAll(/(?:이름|명칭)(?:에서|에)/gu)].some(match => !precedingQuotedName.test(text.slice(0, match.index)) && /^\s*(?:들어간|들어\s*있|포함된|포함되어|없는|제외된)/u.test(text.slice(match.index + match[0].length))))
+  if ([...clean.matchAll(/(?:이름|명칭)(?:에서|에)/gu)].some(match => !precedingQuotedName.test(text.slice(0, match.index)) && /^\s*(?:들어간|들어\s*있|포함된|포함되어|포함\s*안\s*된|없는|제외된)/u.test(text.slice(match.index + match[0].length))))
     add("missing_name_operand", "이름에 포함하거나 제외할 문자열을 지정해 주세요.", "clarification");
   const domain = /예산|종료|상태|이름|명칭|\bID\b|아이디|광고|캠페인|소재|키워드|애셋|에셋|매체|메타|페이스북|인스타그램|네이버|카카오|구글|\b(?:meta|google|naver|kakao|PMax)\b|그\s*중|이\s*중|방금|아까|이전\s*결과|해당\s*결과/iu.test(clean);
   if (!domain && !operations.length && !reference)

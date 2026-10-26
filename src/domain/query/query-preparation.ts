@@ -2,7 +2,7 @@ import Decimal from "decimal.js";
 import { literalProducts, unquotedAdText, queryScopeText } from "../../lib/ad-products";
 import { Clarification, dateRange, type QueryContext } from "./query";
 import { queryLiteralScope, queryRequestRemainder, childEntity, descendantType, assertEntityCapabilities } from "./query-scope";
-import { analyzeQueryEvidence, type GroundedQueryFilter } from "./query-evidence";
+import { analyzeQueryEvidence, queryPlanRemainder, type GroundedQueryFilter } from "./query-evidence";
 import { analyzeQueryAnswerability } from "./query-answerability";
 import type { QueryPlan, QueryTrace } from "./query-model";
 
@@ -128,7 +128,7 @@ function queryEvidence(text: string, numeric: ReturnType<typeof queryLiterals>, 
     const escaped = label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
     const verb = "(?:생성(?:한|된|됐|되었|됨|했고|(?=$|\\s))|만든|만들어진|만들어졌|만들어\\s*둔|등록(?:한|된|했|(?=$|\\s)))";
     const before = new RegExp(`${escaped}(?:에|의|\\s*하루\\s*동안)?\\s*(?:새로\\s*)?${verb}`, "u").exec(clean);
-    const after = new RegExp(`(?:생성(?:일|\\s*날짜)|등록일)(?:이|가|은|는)?\\s*${escaped}(?:인)?`, "u").exec(clean);
+    const after = new RegExp(`(?:생성(?:일|\\s*날짜)|등록일)(?:이|가|은|는)?\\s*(?:기준(?:은|이|는)?\\s*)?${escaped}(?:인)?`, "u").exec(clean);
     const found = before ?? after;
     if (found) {
       const span: [number, number] = [found.index, found.index + found[0].length];
@@ -169,10 +169,14 @@ function assertLiteralPredicates(text: string) {
     throw new Clarification("생성 날짜는 하나의 날짜 또는 지원하는 기간으로 지정해 주세요. 날짜 부정·전후 비교는 지원하지 않습니다.");
 
 }
+export function assertQueryInput(text: string) {
+  if (!text.trim() || text.length > 2000) throw new Clarification("2,000자 이내의 광고 설정 질문을 입력해 주세요.");
+}
+
 // Both inference and direct-plan validation consume the same checked source facts.
 export function preprocessQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace> = {}) {
   trace.outcome = "clarification";
-  if (!text.trim() || text.length > 2000) throw new Clarification("2,000자 이내의 광고 설정 질문을 입력해 주세요.");
+  assertQueryInput(text);
   // Enforce the existing read-only configuration boundary before model interpretation; quoted names stay literal.
   const unquoted = queryScopeText(text);
   const initialRequest = analyzeQueryAnswerability(text, undefined, context);
@@ -227,7 +231,7 @@ export function preprocessQuery(text: string, context: QueryContext | undefined,
       throw new Clarification("예산을 비교할 기준 금액을 지정해 주세요.");
   }
   if ((/예산/u.test(unquoted) && !numeric.amounts.length && /큰|높은|낮|적은|적게|과다|조금|저렴|지나친|적정|넉넉|많이|평균적인|기준보다|기준\s*금액|얼마\s*미만/u.test(unquoted)) ||
-      (/이름|명칭/u.test(unquotedAdText(text)) && /아직|나중에|다음에|미정|비워|모르겠|무엇이|그\s*(?:단어|문구)|해당\s*문구|지정할\s*문구/u.test(unquotedAdText(text)) && !numeric.quotedStrings.length) ||
+      (/이름|명칭/u.test(unquotedAdText(text)) && /아직|나중에|다음에|미정|비워|모르겠|무엇이|(?:그|이)\s*(?:단어|문구)|해당\s*문구|지정할\s*문구/u.test(unquotedAdText(text)) && !numeric.quotedStrings.length) ||
       /(?:이름|명칭).*(?:특정\s*(?:단어|문구)|검색어|어떤\s*(?:단어|문구))/u.test(unquotedAdText(text)) && !numeric.quotedStrings.length ||
       /일예산인지.*(?:전체|총)\s*예산인지|금액\s*단위는\s*빠졌/u.test(unquoted))
     throw new Clarification("비교할 값과 항목을 구체적으로 알려주세요.");
@@ -242,7 +246,16 @@ export function preprocessQuery(text: string, context: QueryContext | undefined,
     throw new Clarification("이전 결과 아래에서 조회할 수 있는 하위 대상을 지정해 주세요.");
   if (literalScope.reference && context?.platforms.length && literalScope.platforms.some(platform => !context.platforms.includes(platform)))
     throw new Clarification("이전 결과의 매체와 다릅니다. 새로 검색할지 이전 결과를 좁힐지 알려주세요.");
-  return { unquoted, numeric, typed, request, evidence, literalScope, scopeEntity, products };
+  const boundFields = new Set(typed.filters.map(fact => fact.field_id));
+  const unfiltered = !!request.operation && ["audit", "policy", "history"].includes(request.operation);
+  const modelFields = typed.complete || unfiltered ? [] : typed.relevant_fields.filter(field => !boundFields.has(field));
+  // An unqualified, unresolved budget retains both trained budget choices.
+  if (modelFields.includes("daily") && !/일\s*예\s*산|하루\s*예\s*산|일일(?:에)?\s*예\s*산|총\s*예\s*산|전체\s*예\s*산/u.test(unquoted))
+    modelFields.push("lifetime");
+  trace.grounded = { ...trace.grounded, model_fields: modelFields };
+  if (!modelFields.length && queryPlanRemainder(typed.residual, request.operation, request.semantic))
+    throw new Clarification("해석하지 못한 추가 조건이 있습니다. 적용할 조건을 나누어 구체적으로 알려주세요.");
+  return { unquoted, numeric, typed, request, evidence, literalScope, scopeEntity, products, modelFields };
 }
 export type PreparedQuery = ReturnType<typeof preprocessQuery>;
 

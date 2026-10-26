@@ -6,8 +6,9 @@ import { ACTIVE, INACTIVE, Clarification, type Query, type QueryContext } from "
 
 import { literalListOperation, descendantType, assertEntityCapabilities } from "./query-scope";
 import type { analyzeQueryEvidence } from "./query-evidence";
+import { queryPlanRemainder } from "./query-evidence";
 import { analyzeQueryAnswerability, requestPlanMismatch, type QueryAnswerability } from "./query-answerability";
-import { queryLiterals, preprocessQuery, namePredicateText, boundNameOperand, exactNameRequested, budgetCurrency, type PreparedQuery } from "./query-preparation";
+import { preprocessQuery, namePredicateText, boundNameOperand, exactNameRequested, budgetCurrency, type PreparedQuery } from "./query-preparation";
 export { queryLiterals } from "./query-preparation";
 export { queryLiteralScope } from "./query-scope";
 
@@ -66,7 +67,7 @@ export const queryRequestState = (text: string, context?: QueryContext) => ({ re
 
 // Reject explicit contradictions and dropped operands; never replace a model's answer with another plan.
 function assertExplicitConditions(plan: QueryPlan, text: string, prepared: PreparedQuery) {
-  if (!["find", "count", "compare"].includes(plan.operation)) return;
+  if (!["find", "count", "compare", "create_rule"].includes(plan.operation)) return;
   const { unquoted: clean, typed: evidence } = prepared;
   const fail = () => { throw new Clarification("질문에 명시한 조건과 모델의 해석이 일치하지 않습니다. 조건을 나누어 다시 질문해 주세요."); };
   const filter = (field: string) => plan.filters.find(item => item.field === field);
@@ -164,6 +165,8 @@ function validatePreparedQuery(raw: unknown, text: string, context: QueryContext
   const products = checked.products;
   assertEntityCapabilities(plan.entity, plan.platforms, products);
   assertExplicitConditions(plan, text, checked);
+  if (queryPlanRemainder(evidence.residual, plan.operation, request.semantic))
+    throw new Clarification("해석하지 못한 추가 조건이 있습니다. 적용할 조건을 나누어 구체적으로 알려주세요.");
   return { ...plan, products, text, reference_time: now };
 }
 const required = (selected: Record<string, Choice>, id: string) => {
@@ -191,7 +194,7 @@ export async function interpretQuery(text: string, context: QueryContext | undef
   };
   try {
     const prepared = preprocessQuery(text, context, now, timezone, trace);
-    const { unquoted, numeric, typed, request, evidence, literalScope, scopeEntity } = prepared;
+    const { unquoted, numeric, typed, request, evidence, literalScope, scopeEntity, modelFields } = prepared;
     const simpleRead = !request.operation || ["find", "count"].includes(request.operation);
     const budgetPredicates = [...text.matchAll(/(일\s*예산|하루\s*예산|총\s*예산|전체\s*예산)(?:이|은|는|가)?\s*\+?\d[\d,]*(?:\.\d+)?\s*(이상|이하|초과|미만)(?:인)?/gu)];
     if (simpleRead && scopeEntity === "campaign" && !literalScope.reference && !numeric.quotedStrings.length && numeric.amounts.length === 1 && budgetPredicates.length === 1) {
@@ -258,11 +261,11 @@ export async function interpretQuery(text: string, context: QueryContext | undef
       created: choice("광고 객체 생성일 또는 만든 날짜 조건이 있나요?", { none: "이 항목에 대한 조회 조건 없음", between: "질문에 나온 날짜 또는 기간에 생성됨", ...unknown }),
     };
     trace.stage = "filters";
-    // Keep other heads for mixed or implicit predicates: a recognized field does not prove all others absent.
     const boundFields = new Set(typed.filters.map(fact => fact.field_id));
-    const selectedQuestions = Object.fromEntries(Object.entries(filterQuestions).filter(([id]) => !boundFields.has(id as typeof typed.filters[number]["field_id"]) && !completeEvidence));
+    const allowedFields = new Set<string>(modelFields);
+    const selectedQuestions = Object.fromEntries(Object.entries(filterQuestions).filter(([id]) => allowedFields.has(id)));
     const filters = Object.keys(selectedQuestions).length ? await ask(selectedQuestions) : {};
-    const literals = queryLiterals(text, now, timezone);
+    const literals = numeric;
     const valueQuestions: Record<string, ChoiceQuestion> = {};
     const valueMaps = new Map<string, unknown[]>();
     const needValue = (id: string, values: unknown[], labels: string[], instruction: string) => {

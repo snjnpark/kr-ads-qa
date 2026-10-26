@@ -23,7 +23,7 @@ export function unquotedAdText(text: string): string {
 }
 // Unquoted name operands are values too; their words must not select scope or capabilities.
 const nameMarker = "(?:(?:캠페인|광고(?:\\s*(?:그룹|세트))?|(?:애셋|에셋)\\s*그룹|키워드|소재)\\s*(?:이름|명칭)|캠페인명|광고(?:\\s*(?:그룹|세트))?명|(?:애셋|에셋)\\s*그룹명|키워드명|소재명|그룹명|세트명|이름|명칭)";
-const unquotedNamePredicate = new RegExp(`(${nameMarker}(?:에|에서)?\\s+)[^\\s,;\\x22\\x27\\x60“”‘’]{1,64}(?:\\s+[^\\s,;\\x22\\x27\\x60“”‘’]{1,64}){0,3}?\\s*(?:가|이|을|를)?\\s*(?:포함|들어|제외|없|있)[가-힣]*`, "gu");
+const unquotedNamePredicate = new RegExp(`(${nameMarker}(?:에|에서)?\\s+)[^\\s,;\\x22\\x27\\x60“”‘’]{1,64}(?:\\s+[^\\s,;\\x22\\x27\\x60“”‘’]{1,64}){0,3}?\\s*(?:가|이|을|를)?\\s*(?:포함|들어|제외|빠진|뺀|없|있)[가-힣]*`, "gu");
 const unquotedExactName = new RegExp(`(${nameMarker}(?:이|가)\\s+)[^\\s,;\\x22\\x27\\x60“”‘’]{1,64}?(?:인|와\\s*같은|과\\s*같은)(?=\\s|$)`, "gu");
 export const precedingQuotedName = /(?:"[^"]+"|'[^']+'|“[^”]+”|‘[^’]+’|`[^`]+`)(?:\s*(?:이라는|라는)\s*(?:문구|말|글자|단어|문자열))?(?:이|가|을|를|와|과)?\s*$/u;
 export const queryIntroduction = /^\s*(?:인수인계(?:를)?\s*받는\s*담당자(?:야|입니다)[.!?]?|검수\s*담당자(?:라|인데)|보고서에\s*쓸|다음\s*담당자에게\s*줄|담당\s*캠페인을\s*점검하려고요[.!?])(?=\s|$)/u;
