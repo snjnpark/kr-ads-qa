@@ -143,7 +143,7 @@ export class RuleBuilder {
       );
     } else if (/운영\s*상태|활성|일시\s*중지/.test(text)) {
       const paused = /일시\s*중지|중지\s*상태|비활성/.test(text);
-      if (contextPolicy && (!/활성|일시\s*중지|중지\s*상태/.test(text) || /아니|않|제외/.test(text)))
+      if (contextPolicy && (!/활성|일시\s*중지|중지\s*상태/.test(text) || /아니|아닌|않|제외/.test(text)))
         throw new Error("운영 상태는 활성 또는 일시중지 중 정상 기준을 명확히 입력해 주세요.");
       check = { field: "status", operator: "in", value: paused
         ? ["PAUSED", "DISABLED", "OFF", "STOPPED"] : ["ACTIVE", "ENABLED", "ON", "ELIGIBLE", "NORMAL"] };

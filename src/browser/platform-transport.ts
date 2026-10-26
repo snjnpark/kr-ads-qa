@@ -6,6 +6,7 @@ import { NaverAdapter } from "../server/platforms/naver";
 import { KakaoAdapter } from "../server/platforms/kakao";
 import { KakaoKeywordAdapter } from "../server/platforms/kakao-keyword";
 import { GoogleAdapter } from "../server/platforms/google";
+import type { OperationSignal } from "../server/platforms/http";
 import { buildRelayRequest, relayOperation, type RelayPlatform, type RelayRequest } from "../relay/contract";
 
 export const BROWSER_CREDENTIAL_FIELDS: Record<Platform, readonly string[]> = {
@@ -15,7 +16,7 @@ export const BROWSER_CREDENTIAL_FIELDS: Record<Platform, readonly string[]> = {
   kakao_keyword: ["business_token"],
   google: ["access_token", "login_customer_id"],
 };
-export type BrowserTransportOptions = { signal?: AbortSignal; fetch?: typeof fetch };
+export type BrowserTransportOptions = { signal?: AbortSignal; getSignal?: OperationSignal; fetch?: typeof fetch };
 const relayOrigins = { naver: "https://api.searchad.naver.com", kakao_keyword: "https://api.keywordad.kakao.com" } as const;
 function blocked(): never { throw new PlatformError("WRITE_BLOCKED", "허용된 광고 조회만 실행할 수 있습니다."); }
 function params(url: URL) {
@@ -32,7 +33,7 @@ export function createBrowserTransport(platform: Platform, options: BrowserTrans
   return async (input, init) => {
     const url = new URL(String(input));
     const method = (init?.method || "GET").toUpperCase();
-    const signals = [init?.signal, options.signal].filter((value): value is AbortSignal => !!value);
+    const signals = [init?.signal, options.signal, options.getSignal?.()].filter((value): value is AbortSignal => !!value);
     const signal = signals.length ? AbortSignal.any(signals) : undefined;
     signal?.throwIfAborted();
     if (url.username || url.password || url.port || url.hash || url.protocol !== "https:") return blocked();
@@ -80,9 +81,13 @@ export function createPlatformAdapter(platform: Platform, credentials: Record<st
   const required = platform === "google" ? ["access_token"] : platform === "meta" ? ["access_token"] : platform === "naver" ? ["api_key", "secret_key", "customer_id"] : ["business_token"];
   if (required.some((key) => !credentials[key])) throw new PlatformError("AUTHENTICATION", "브라우저 연결 정보를 모두 입력해 주세요.");
   const fetch = createBrowserTransport(platform, options);
-  if (platform === "meta") return new MetaAdapter(credentials.access_token, { fetch });
-  if (platform === "naver") return new NaverAdapter(credentials.api_key, credentials.secret_key, credentials.customer_id, { fetch });
-  if (platform === "kakao") return new KakaoAdapter(credentials.business_token, { fetch });
-  if (platform === "kakao_keyword") return new KakaoKeywordAdapter(credentials.business_token, { fetch });
-  return new GoogleAdapter({ ...credentials }, { fetch });
+  const getSignal = () => {
+    const signals = [options.signal, options.getSignal?.()].filter((value): value is AbortSignal => !!value);
+    return signals.length ? AbortSignal.any(signals) : undefined;
+  };
+  if (platform === "meta") return new MetaAdapter(credentials.access_token, { fetch, getSignal });
+  if (platform === "naver") return new NaverAdapter(credentials.api_key, credentials.secret_key, credentials.customer_id, { fetch, getSignal });
+  if (platform === "kakao") return new KakaoAdapter(credentials.business_token, { fetch, getSignal });
+  if (platform === "kakao_keyword") return new KakaoKeywordAdapter(credentials.business_token, { fetch, getSignal });
+  return new GoogleAdapter({ ...credentials }, { fetch, getSignal });
 }

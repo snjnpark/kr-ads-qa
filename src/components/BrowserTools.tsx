@@ -70,8 +70,8 @@ export function BrowserBackupTools() {
   }
   async function restore(file: File) {
     if (file.size > 100 * 1024 * 1024) { setMessage("백업 파일은 100MB 이하여야 합니다."); return; }
-    if (!window.confirm("현재 브라우저의 저장 데이터를 백업 내용으로 바꿀까요? 먼저 현재 자료를 백업해 주세요.")) return;
-    try { const result = await browserCall<{ message: string }>("/backup/import", { method: "POST", body: { content: await file.text() } }); setMessage(result.message); }
+    if (!window.confirm("현재 브라우저의 저장 데이터를 백업 내용으로 바꾸고 새로고침할까요? 먼저 현재 자료를 백업해 주세요. 인증 정보는 다시 연결해야 합니다.")) return;
+    try { const result = await browserCall<{ message: string }>("/backup/import", { method: "POST", body: { content: await file.text() } }); setMessage(result.message); window.location.reload(); }
     catch (error) { setMessage((error as Error).message); }
   }
   return <div className="settings-maintenance" aria-label="브라우저 데이터 백업">

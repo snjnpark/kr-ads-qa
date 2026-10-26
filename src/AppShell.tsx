@@ -44,11 +44,14 @@ import { confirmDiscard } from "@/lib/navigation-guard";
 import type { Account, AppState, Scope } from "@/contracts/api";
 import { AD_PRODUCTS } from "@/lib/ad-products";
 
-const navigation = [
-  { id: "ask", path: "/", label: "검색", icon: Search, tab: "search" },
+const statusNavigation = [
   { id: "overview", path: "/overview", label: "요약", icon: LayoutDashboard, tab: "status" },
   { id: "audit", path: "/audit", label: "검사", icon: ClipboardCheck, tab: "status" },
   { id: "history", path: "/history", label: "변경 이력", icon: History, tab: "status" },
+];
+const navigation = [
+  { id: "ask", path: "/", label: "검색", icon: Search, tab: "search" },
+  ...statusNavigation,
   { id: "policies", path: "/policies", label: "운영 정책", icon: BookOpen, tab: "rules" },
   { id: "settings", path: "/settings", label: "설정", icon: Settings2, tab: "settings" },
 ];
@@ -238,7 +241,6 @@ function Workspace() {
   const visibleAccounts = catalog.filter(
     (account) => platform === "all" || account.platform === platform,
   );
-  const sections = navigation.filter((item) => item.tab === active.tab);
   return (
     <TooltipProvider>
       <div className={`app-layout workspace-shell tab-${active.tab}`}>
@@ -410,23 +412,22 @@ function Workspace() {
                     onRefresh={refresh}
                   />
                 </div>
-                {sections.length > 1 && (
-                  <Tabs value={page} onValueChange={navigate} activationMode="manual" className={`section-tabs ${active.tab === "status" ? "status-workspace" : ""}`}>
+                {active.tab === "status" && (
+                  <Tabs value={page} onValueChange={navigate} activationMode="manual" className="section-tabs status-workspace">
                     <div className="section-navigation">
-                      <TabsList aria-label={active.tab === "status" ? "현황 메뉴" : "규칙 메뉴"}>
-                        {sections.map((item) => (
+                      <TabsList aria-label="현황 메뉴">
+                        {statusNavigation.map((item) => (
                           <TabsTrigger key={item.id} value={item.id} disabled={syncing}>
                             <item.icon size={15} />{item.label}
                           </TabsTrigger>
                         ))}
                       </TabsList>
                     </div>
-                    {sections.map((item) => (
+                    {statusNavigation.map((item) => (
                       <TabsContent key={item.id} value={item.id} className="page-content">
                         {item.id === "overview" && <OverviewPage state={state} scope={scope} policyId={policyId} onPolicyChange={setPolicyId} onAudit={() => { setAuditToOpen(""); setAuditRequest(request => request + 1); navigate("audit"); }} onOpenAudit={id => { setAuditRequest(0); setAuditToOpen(id); navigate("audit"); }} onNavigate={navigate} />}
                         {item.id === "audit" && <AuditPage state={state} scope={scope} policyId={policyId} onPolicyChange={setPolicyId} auditRequest={auditRequest} onAuditStarted={() => setAuditRequest(0)} requestedRun={auditToOpen} onRunOpened={() => setAuditToOpen("")} onRefresh={refresh} onNavigate={navigate} />}
                         {item.id === "history" && <HistoryPage scope={scope} onRefresh={refresh} />}
-                        {item.id === "policies" && <PoliciesPage scope={scope} accounts={state.accounts} onRefresh={refresh} />}
                       </TabsContent>
                     ))}
                   </Tabs>

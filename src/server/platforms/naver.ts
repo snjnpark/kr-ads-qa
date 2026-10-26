@@ -19,6 +19,7 @@ import {
   ReadOnlyHTTP,
   timestamp,
   type FetchLike,
+  type OperationSignal,
 } from "./http";
 import { validateApiEntity } from "./contracts";
 
@@ -127,7 +128,7 @@ export class NaverAdapter extends BaseAdapter {
     private apiKey: string,
     private secretKey: string,
     readonly customerId: string,
-    options: { fetch?: FetchLike } = {},
+    options: { fetch?: FetchLike; getSignal?: OperationSignal } = {},
   ) {
     super();
     if (!apiKey || !secretKey || !customerId)
@@ -149,6 +150,8 @@ export class NaverAdapter extends BaseAdapter {
         ],
       },
       options.fetch,
+      undefined,
+      options.getSignal,
     );
   }
   async get(path: string, accountId: string, params: Json = {}) {

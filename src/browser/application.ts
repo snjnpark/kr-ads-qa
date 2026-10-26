@@ -10,7 +10,7 @@ import {
   type Json,
   type Settings,
 } from "../server/models";
-import { BrowserStorage as Storage } from "./storage";
+import { BrowserStorage as Storage, type StorageSnapshot } from "./storage";
 
 import {
   asPlatformError,
@@ -68,6 +68,7 @@ export class BrowserApplication {
   private schedulerPending = false;
   private closing = false;
   private closePromise?: Promise<void>;
+  private backupRestored = false;
   schedulerError = "";
   constructor(
     readonly settings: Settings,
@@ -101,13 +102,28 @@ export class BrowserApplication {
       this.source = "이 브라우저의 저장 데이터";
     }
   }
+  assertAvailable() {
+    if (this.backupRestored) throw new Error("백업 복원을 마쳤습니다. 새로고침한 뒤 인증 정보를 다시 연결해 주세요.");
+  }
+  async restoreBackup(snapshot: StorageSnapshot, signal?: AbortSignal) {
+    await this.mutex.run(async () => {
+      this.assertAvailable();
+      await this.storage.atomic(() => this.storage.replace(snapshot), { signal });
+      // Only a committed restore invalidates credentials, query context and active settings.
+      this.backupRestored = true;
+      if (this.timer) { clearInterval(this.timer); this.timer = undefined; }
+      const adapters = Object.values(this.adapters); this.adapters = {};
+      await Promise.allSettled(adapters.map(adapter => adapter.close()));
+      await this.initialize();
+    });
+  }
   startScheduler() {
-    if (this.timer || this.settings.snapshot_interval_seconds <= 0) return;
+    if (this.backupRestored || this.timer || this.settings.snapshot_interval_seconds <= 0) return;
     this.timer = setInterval(() => {
-      if (this.closing || this.schedulerPending || !Object.keys(this.adapters).length) return;
+      if (this.backupRestored || this.closing || this.schedulerPending || !Object.keys(this.adapters).length) return;
       this.schedulerPending = true;
       void this.mutex.run(async () => {
-        if (this.closing || !Object.keys(this.adapters).length) return;
+        if (this.backupRestored || this.closing || !Object.keys(this.adapters).length) return;
         try {
           await this.storage.atomic(async () => {
             if (this.hydratedRevision !== this.storage.revision) await this.initialize();
@@ -229,7 +245,6 @@ export class BrowserApplication {
         }
       }),
     );
-    if (!adapters.length && (scope.platforms?.length || scope.accounts?.length)) fail("선택한 플랫폼의 계정 연결이 없습니다.");
     for (const p of scope.platforms ?? [])
       if (!adapters.some(([key]) => key === p))
         fail(`${p}: 계정 연결이 없습니다.`);

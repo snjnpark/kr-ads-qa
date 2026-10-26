@@ -68,6 +68,9 @@ export const platforms: Record<string, string> = {
   kakao_keyword: "카카오 키워드광고",
   google: "Google",
 };
+export function platformLabel(platform: string): string {
+  return platforms[platform] ?? platform;
+}
 export function PlatformMark({
   platform,
   withLabel = true,
@@ -85,7 +88,7 @@ export function PlatformMark({
           height={24}
         />}
       </span>
-      {withLabel && <span>{platforms[platform] ?? platform}</span>}
+      {withLabel && <span>{platformLabel(platform)}</span>}
     </span>
   );
 }

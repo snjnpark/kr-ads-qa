@@ -22,6 +22,7 @@ import {
   validateHistoryRange,
   zonedParts,
   type FetchLike,
+  type OperationSignal,
 } from "./http";
 import { validateApiEntity, validateGoogleAccount } from "./contracts";
 
@@ -182,7 +183,7 @@ export class GoogleAdapter extends BaseAdapter {
   private loginCustomerId: string;
   constructor(
     private credentials: Record<string, string>,
-    options: { fetch?: FetchLike; api_version?: string } = {},
+    options: { fetch?: FetchLike; api_version?: string; getSignal?: OperationSignal } = {},
   ) {
     super();
     if (
@@ -221,6 +222,8 @@ export class GoogleAdapter extends BaseAdapter {
         "https://oauth2.googleapis.com": [["POST", /^\/token$/]],
       },
       options.fetch,
+      undefined,
+      options.getSignal,
     );
   }
   async refreshAccessToken() {

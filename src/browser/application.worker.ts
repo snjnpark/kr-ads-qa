@@ -29,6 +29,7 @@ const api = createApi(() => appPromise);
 
 async function localCall(call: Call): Promise<unknown> {
   const app = await appPromise;
+  app.assertAvailable();
   const pathname = new URL(call.path, "https://browser.invalid").pathname;
   if (pathname === "/model/status") return app.ai.modelStatus;
   if (pathname === "/runtime") return runtimeInfo;
@@ -49,7 +50,7 @@ async function localCall(call: Call): Promise<unknown> {
     const text = (call.body as { content?: unknown })?.content;
     if (typeof text !== "string") throw new Error("백업 파일을 확인해 주세요.");
     const snapshot = await parseBrowserBackup(text);
-    await app.mutex.run(async () => { await app.storage.atomic(() => app.storage.replace(snapshot), { signal: cancellations.get(call.id)?.signal }); for (const adapter of Object.values(app.adapters)) await adapter.close(); app.adapters = {}; await app.initialize(); });
+    await app.restoreBackup(snapshot, cancellations.get(call.id)?.signal);
     return { message: "이 브라우저에 백업을 복원했습니다. 인증 정보는 다시 연결해 주세요." };
   }
   const method = call.method ?? "GET";

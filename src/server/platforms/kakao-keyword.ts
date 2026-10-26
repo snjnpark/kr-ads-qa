@@ -1,7 +1,7 @@
 import { createEntity, type Entity, type FieldState, type Json } from "../models";
 import { asPlatformError, BaseAdapter, identity, object, PartialFetchError, PlatformError } from "./base";
 import { validateApiEntity } from "./contracts";
-import { decimalValue, fieldState, ReadOnlyHTTP, timestamp, type FetchLike } from "./http";
+import { decimalValue, fieldState, ReadOnlyHTTP, timestamp, type FetchLike, type OperationSignal } from "./http";
 
 const paths: Record<string, string> = {
   account: "adAccounts",
@@ -36,13 +36,13 @@ export class KakaoKeywordAdapter extends BaseAdapter {
   readonly http: ReadOnlyHTTP;
   private allowedAccounts: Set<string> | null = null;
 
-  constructor(private token: string, options: { fetch?: FetchLike } = {}) {
+  constructor(private token: string, options: { fetch?: FetchLike; getSignal?: OperationSignal } = {}) {
     super();
     this.http = new ReadOnlyHTTP({
       "https://api.keywordad.kakao.com": [["GET", /^\/openapi\/v1\/(?:adAccounts\/pages|(?:adAccounts|campaigns|adGroups|keywords|creativeLinks)(?:\/\d+)?|creatives\/basic(?:\/\d+)?)$/]],
       "https://kapi.kakao.com": [["GET", /^\/v1\/business\/tokeninfo$/]],
       "https://kauth.kakao.com": [["POST", /^\/oauth\/business\/token$/]],
-    }, options.fetch);
+    }, options.fetch, undefined, options.getSignal);
   }
 
   private requireToken() {

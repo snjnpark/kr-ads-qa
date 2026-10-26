@@ -19,6 +19,7 @@ import {
   ReadOnlyHTTP,
   timestamp,
   type FetchLike,
+  type OperationSignal,
 } from "./http";
 import { validateApiEntity } from "./contracts";
 
@@ -48,7 +49,7 @@ export class KakaoAdapter extends BaseAdapter {
   };
   constructor(
     private token: string,
-    options: { fetch?: FetchLike } = {},
+    options: { fetch?: FetchLike; getSignal?: OperationSignal } = {},
   ) {
     super();
     this.http = new ReadOnlyHTTP(
@@ -63,6 +64,8 @@ export class KakaoAdapter extends BaseAdapter {
         "https://kauth.kakao.com": [["POST", /^\/oauth\/business\/token$/]],
       },
       options.fetch,
+      undefined,
+      options.getSignal,
     );
   }
   async get(path: string, accountId = "", params: Json = {}) {

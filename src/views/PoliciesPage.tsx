@@ -22,6 +22,59 @@ type Preview = { rule: Rule; notes: string[] };
 const identity = (prefix: string) => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
 const clean = (policy: Policy): Policy => JSON.parse(policyDocument(policy));
 
+// Commands own validation and the single active request; React owns editor presentation.
+export function createPolicyCommands(context: {
+  policy: Policy;
+  selected: string;
+  locked: boolean;
+  dirty: boolean;
+  hasDraft: boolean;
+  text: string;
+  preview: Preview | null;
+  request: { current: AbortController | null };
+  start: (operation: string) => void;
+  fail: (message: string) => void;
+  finish: () => void;
+  saved: (policy: Policy) => void;
+  drafted: (preview: Preview) => void;
+  added: (policy: Policy, section: Section) => void;
+}) {
+  const { policy, selected, locked, dirty, hasDraft, text, preview } = context;
+  async function perform<T>(operation: string, fetcher: (signal: AbortSignal) => Promise<T>, apply: (data: T) => void) {
+    if (context.request.current) return;
+    const pending = new AbortController();
+    context.request.current = pending;
+    context.start(operation);
+    try {
+      const result = await fetcher(pending.signal);
+      if (!pending.signal.aborted) apply(result);
+    } catch (err) {
+      if (!pending.signal.aborted) context.fail((err as Error).message);
+    } finally {
+      if (context.request.current === pending) { context.request.current = null; context.finish(); }
+    }
+  }
+  function save() {
+    if (locked || !dirty || !policy.name.trim() || !policy.platforms.length || hasDraft) return;
+    const document = { ...policy, name: policy.name.trim() };
+    return perform("save", signal => api<Policy>(selected ? `/policies/${encodeURIComponent(selected)}` : "/policies", {
+      method: selected ? "PUT" : "POST", body: { yaml: policyDocument(document) }, signal,
+    }), context.saved);
+  }
+
+  function generate() {
+    if (locked || !text.trim()) return;
+    return perform("draft", signal => api<Preview>("/policies/draft", { method: "POST", body: { yaml: policyDocument(policy), text: text.trim() }, signal }), context.drafted);
+  }
+  function addPreview() {
+    if (!preview) return;
+    const incoming = preview.rule;
+    if (policy.rules.some(rule => rule.rule_id === incoming.rule_id)) { context.fail("이미 추가한 조건입니다."); return; }
+    context.added({ ...policy, rules: [...policy.rules, incoming] }, incoming.platforms.find(platform => policy.platforms.includes(platform)) ?? "common");
+  }
+  return { perform, save, generate, addPreview };
+}
+
 export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scope; accounts?: Account[]; onRefresh?: () => void }) {
   const [policy, setPolicy] = useState<Policy>(() => emptyPolicy(identity("policy")));
   const [baseline, setBaseline] = useState(() => policyDocument(policy));
@@ -50,6 +103,20 @@ export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scop
     ...policy.account_ids.filter(id => !accounts.some(account => account.account_id === id)).map(id => [id, id] as const),
   ]).entries()];
 
+  const { perform, save, generate, addPreview } = createPolicyCommands({
+    policy, selected, locked, dirty, hasDraft, text, preview, request,
+    start: operation => { setBusy(operation); setError(""); },
+    fail: setError,
+    finish: () => setBusy(""),
+    saved: saved => {
+      replace(saved, saved.policy_id);
+      setCatalog(items => [...items.filter(item => item.policy_id !== saved.policy_id), clean(saved)]);
+      onRefresh?.(); toast.success(`정책을 버전 ${saved.version}으로 저장했습니다.`);
+    },
+    drafted: setPreview,
+    added: (next, section) => { edit(next); setSection(section); discardDraft(); },
+  });
+
   useEffect(() => {
     const initial = new AbortController();
     api<{ policies: Policy[] }>("/policies", { signal: initial.signal })
@@ -64,21 +131,6 @@ export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scop
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  async function perform<T>(operation: string, fetcher: (signal: AbortSignal) => Promise<T>, apply: (data: T) => void) {
-    if (request.current) return;
-    const pending = new AbortController();
-    request.current = pending;
-    setBusy(operation);
-    setError("");
-    try {
-      const result = await fetcher(pending.signal);
-      if (!pending.signal.aborted) apply(result);
-    } catch (err) {
-      if (!pending.signal.aborted) setError((err as Error).message);
-    } finally {
-      if (request.current === pending) { request.current = null; setBusy(""); }
-    }
-  }
   function edit(next: Policy) { setPolicy(next); }
   function discardDraft() { setText(""); setPreview(null); }
   function replace(next: Policy, id: string, previous = false) {
@@ -111,29 +163,6 @@ export default function PoliciesPage({ accounts = [], onRefresh }: { scope: Scop
   function openVersions() {
     setVersions([]); setDialog("versions");
     void perform("versions", signal => api<Policy[]>(`/policies/${encodeURIComponent(selected)}/versions`, { signal }), setVersions);
-  }
-  function save() {
-    if (locked || !dirty || !policy.name.trim() || !policy.platforms.length || hasDraft) return;
-    const document = { ...policy, name: policy.name.trim() };
-    void perform("save", signal => api<Policy>(selected ? `/policies/${encodeURIComponent(selected)}` : "/policies", {
-      method: selected ? "PUT" : "POST", body: { yaml: policyDocument(document) }, signal,
-    }), saved => {
-      replace(saved, saved.policy_id);
-      setCatalog(items => [...items.filter(item => item.policy_id !== saved.policy_id), clean(saved)]);
-      onRefresh?.(); toast.success(`정책을 버전 ${saved.version}으로 저장했습니다.`);
-    });
-  }
-  function generate() {
-    if (locked || !text.trim()) return;
-    void perform("draft", signal => api<Preview>("/policies/draft", { method: "POST", body: { yaml: policyDocument(policy), text: text.trim() }, signal }), setPreview);
-  }
-  function addPreview() {
-    if (!preview) return;
-    const incoming = preview.rule;
-    if (policy.rules.some(rule => rule.rule_id === incoming.rule_id)) { setError("이미 추가한 조건입니다."); return; }
-    edit({ ...policy, rules: [...policy.rules, incoming] });
-    setSection(incoming.platforms.find(platform => policy.platforms.includes(platform)) ?? "common");
-    setText(""); setPreview(null);
   }
   function renderPreset(preset: RulePreset) {
     const rule = categoryRules.find(item => matchesPreset(item, preset));

@@ -160,7 +160,15 @@ export class BrowserStorage {
     if (!value || value.complete !== true || typeof value.fetched_at !== "string" || !Array.isArray(value.entities)) return null;
     const age = Date.now() - Date.parse(value.fetched_at);
     if (!Number.isFinite(age) || age < 0 || age >= ttl * 1000) return null;
-    try { return value.entities.map((entity: Entity) => createEntity(entity)); } catch { return null; }
+    try {
+      const entities = value.entities.map((entity: Entity) => createEntity(entity));
+      const keys = new Set<string>();
+      for (const entity of entities) {
+        if (`${entity.platform}/${entity.account_id}` !== key || keys.has(entity.key)) return null;
+        keys.add(entity.key);
+      }
+      return entities;
+    } catch { return null; }
   }
   cachePut(key: string, entities: Entity[]): void {
     const restored = entities.map(entity => createEntity(entity));

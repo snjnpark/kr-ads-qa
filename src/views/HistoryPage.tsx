@@ -68,6 +68,9 @@ type Report = {
   complete?: boolean;
   comparable?: boolean;
 };
+function countFor(counts: ReadonlyMap<string, number>, label: string): number {
+  return counts.get(label) ?? 0;
+}
 export default function HistoryPage({
   scope,
   onRefresh,
@@ -183,16 +186,16 @@ export default function HistoryPage({
   const labelCounts = new Map<string, number>(),
     labelPositions = new Map<string, number>();
   snapshotLabels.forEach((label) =>
-    labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1),
+    labelCounts.set(label, countFor(labelCounts, label) + 1),
   );
   const options = snapshots.map((item, index) => {
     const label = snapshotLabels[index];
-    const position = (labelPositions.get(label) ?? 0) + 1;
+    const position = countFor(labelPositions, label) + 1;
     labelPositions.set(label, position);
     return {
       value: item.snapshot_id,
       label:
-        (labelCounts.get(label) ?? 0) > 1
+        countFor(labelCounts, label) > 1
           ? `${label} · 저장본 ${position}`
           : label,
     };

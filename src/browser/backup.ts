@@ -3,6 +3,7 @@ import { auditRulesSchema } from "../lib/audit-rules";
 import { createEntity } from "../server/models";
 import { loadPolicy } from "../server/policies/schema";
 import { BrowserStorage, validateStorageSnapshot, type StorageSnapshot } from "./storage";
+import { validateSettings } from "./settings";
 
 export const BACKUP_FORMAT = "laya-browser-backup";
 const MAX_BYTES = 100 * 1024 * 1024;
@@ -25,6 +26,10 @@ function validScope(value: unknown): boolean {
 }
 /** Validate semantic references too; a self-consistent hash alone is not trusted input. */
 function validateContents(snapshot: StorageSnapshot): void {
+  for (const [key, settings] of snapshot.tables.settings) {
+    if (key !== "preferences") throw new Error("백업의 앱 설정 항목을 확인해 주세요.");
+    validateSettings({ ...settings, mode: "live", ai_mode: "laya" });
+  }
   const policyVersions = new Map(snapshot.tables.policy_versions);
   const current = new Map(snapshot.tables.policies);
   for (const [key, raw] of snapshot.tables.policies) {

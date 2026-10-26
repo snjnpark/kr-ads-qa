@@ -37,6 +37,7 @@ import {
   InlineError,
   dateText,
   platforms,
+  platformLabel,
 } from "@/components/shared";
 import PolicyPicker from "@/components/PolicyPicker";
 import ResultsTable from "@/components/ResultsTable";
@@ -154,7 +155,8 @@ export function AskPage({
     input.current?.focus();
   }
   async function search() {
-    if (!text.trim() || busy) return;
+    // The controller ref locks immediately, before React publishes the busy state.
+    if (!text.trim() || busy || (controller.current && !controller.current.signal.aborted)) return;
     const request = ++sequence.current;
     controller.current?.abort();
     const pending = new AbortController();
@@ -179,7 +181,7 @@ export function AskPage({
     } catch (error) {
       if (sequence.current === request) setError((error as Error).message);
     } finally {
-      if (sequence.current === request) setBusy(false);
+      if (sequence.current === request) { controller.current = null; setBusy(false); }
     }
   }
   const meaningRows = Object.entries(result?.semantic_decisions ?? {}).map(
@@ -423,6 +425,50 @@ export function AskPage({
   );
 }
 
+type AuditCommand = { kind: "audit" | "anomalies" } | { kind: "history"; id: string };
+type AuditResult = Result & { scope?: Scope };
+
+// The command owns admission and request identity; React owns the displayed state.
+export async function runAuditCommand(command: AuditCommand, context: {
+  busy: string;
+  hasPolicy: boolean;
+  policyId: string;
+  scope: Scope;
+  seq: { current: number };
+  controller: { current: AbortController | null };
+  request: (path: string, options: { method?: string; body?: unknown; signal: AbortSignal }) => Promise<AuditResult>;
+  reset: () => void;
+  start: (kind: AuditCommand["kind"], id: string) => void;
+  complete: (data: AuditResult, request: number, kind: AuditCommand["kind"]) => void;
+  fail: (message: string) => void;
+  finish: () => void;
+}) {
+  if (context.busy || (command.kind === "audit" && !context.hasPolicy)) return;
+  if (command.kind === "history" && !command.id) {
+    context.reset();
+    return;
+  }
+  const request = ++context.seq.current;
+  context.controller.current?.abort();
+  const pending = new AbortController();
+  context.controller.current = pending;
+  context.start(command.kind, command.kind === "history" ? command.id : "");
+  try {
+    const data = await (command.kind === "history"
+      ? context.request(`/audits/${command.id}`, { signal: pending.signal })
+      : context.request(`/${command.kind}`, {
+          method: "POST",
+          body: { ...context.scope, ...(command.kind === "audit" ? { policy_id: context.policyId } : {}) },
+          signal: pending.signal,
+        }));
+    if (request === context.seq.current) context.complete(data, request, command.kind);
+  } catch (error) {
+    if (request === context.seq.current) context.fail((error as Error).message);
+  } finally {
+    if (request === context.seq.current) context.finish();
+  }
+}
+
 export function AuditPage({
   state,
   scope,
@@ -484,74 +530,39 @@ export function AuditPage({
     const timer = setTimeout(() => { onRunOpened?.(); void loadRun(requestedRun); }, 0);
     return () => clearTimeout(timer);
   }, [requestedRun]);
-  async function execute(action: "audit" | "anomalies") {
-    if (busy || (action === "audit" && !selectedPolicy)) return;
-    const request = ++seq.current;
-    controller.current?.abort();
-    const pending = new AbortController();
-    controller.current = pending;
-    setBusy(action);
-    setError("");
-    setResult(null);
-    setRow(null);
-    setRun("");
-    try {
-      const data = await api<Result>(`/${action}`, {
-        method: "POST",
-        body: {
-          ...scope,
-          ...(action === "audit"
-            ? {
-                policy_id: policyId,
-              }
-            : {}),
-        },
-        signal: pending.signal,
-      });
-      if (request === seq.current) {
+  function dispatch(command: AuditCommand) {
+    return runAuditCommand(command, {
+      busy, hasPolicy: Boolean(selectedPolicy), policyId, scope, seq, controller,
+      request: api<Result & { scope?: Scope }>,
+      reset: resetResult,
+      start: (kind, id) => {
+        setRun(id);
+        setBusy(kind);
+        setError("");
+        setResult(null);
+        setRow(null);
+      },
+      complete: (data, request, kind) => {
         setResult(data);
-        setRun(data.run_id ?? "");
         setResultKey(request);
-        setResultKind(action);
-        setResultScope(scope);
-        onRefresh();
-      }
-    } catch (error) {
-      if (request === seq.current) setError((error as Error).message);
-    } finally {
-      if (request === seq.current) setBusy("");
-    }
+        setResultKind(kind);
+        if (kind === "history") {
+          setResultScope(data.scope ?? {});
+        } else {
+          setRun(data.run_id ?? "");
+          setResultScope(scope);
+          onRefresh();
+        }
+      },
+      fail: setError,
+      finish: () => setBusy(""),
+    });
   }
-  async function loadRun(id: string) {
-    if (busy) return;
-    if (!id) {
-      resetResult();
-      return;
-    }
-    setRun(id);
-    const request = ++seq.current;
-    controller.current?.abort();
-    const pending = new AbortController();
-    controller.current = pending;
-    setBusy("history");
-    setError("");
-    setResult(null);
-    setRow(null);
-    try {
-      const data = await api<Result & { scope?: Scope }>(`/audits/${id}`, {
-        signal: pending.signal,
-      });
-      if (request === seq.current) {
-        setResult(data);
-        setResultKind("history");
-        setResultKey(request);
-        setResultScope(data.scope ?? {});
-      }
-    } catch (error) {
-      if (request === seq.current) setError((error as Error).message);
-    } finally {
-      if (request === seq.current) setBusy("");
-    }
+  function execute(action: "audit" | "anomalies") {
+    return dispatch({ kind: action });
+  }
+  function loadRun(id: string) {
+    return dispatch({ kind: "history", id });
   }
   return (
     <>
@@ -599,7 +610,7 @@ export function AuditPage({
             <div><dt>조회 범위</dt><dd>{scopeDescription(scope, state.accounts, platforms)}</dd></div>
             <div><dt>정책과 겹치는 조회 계정</dt><dd>{selectedPolicy ? (() => {
               const accounts = overviewScopeData(state, scope).accounts.filter(account => selectedPolicy.platforms.includes(account.platform as typeof selectedPolicy.platforms[number]) && (!selectedPolicy.account_ids.length || selectedPolicy.account_ids.includes(account.account_id)));
-              return accounts.length ? accounts.map(account => `${platforms[account.platform] ?? account.platform} · ${account.name}`).join(" / ") : "조회된 계정 없음";
+              return accounts.length ? accounts.map(account => `${platformLabel(account.platform)} · ${account.name}`).join(" / ") : "조회된 계정 없음";
             })() : "정책을 선택하세요"}</dd></div>
           </dl>
           <p className="fine-print mt-3">저장된 정책과 겹치는 범위만 검사합니다. 미저장 편집은 적용되지 않습니다.</p>

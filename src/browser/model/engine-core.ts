@@ -54,7 +54,7 @@ export const SEMANTIC_QUESTIONS = {
 } satisfies Record<string, ChoiceQuestion>;
 export const QUESTION_SCHEMA_VERSION = "ads-audience-objective-v1";
 export const SEMANTIC_POLICY_VERSION =
-  "typed-input-order-commercial-conflict-v2";
+  "typed-input-order-commercial-conflict-view-abstention-v3";
 export type SemanticInput = {
   platform: string;
   account_id: string;
@@ -483,7 +483,8 @@ async judgeBatch(
             scores[selected]! < this.threshold ||
             values[0]! - values[1]! < this.margin ||
             !!output.usage?.truncated ||
-            !!output.usage?.options;
+            !!output.usage?.options ||
+            views.some((view) => view.label === null);
           decisions.push(
             this.decision(
               uncertain ? null : selected,

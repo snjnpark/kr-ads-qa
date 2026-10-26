@@ -17,8 +17,9 @@ class RelayFailure extends Error {
 function failure(code: string, status: number) {
   return new Response(JSON.stringify({ error: { code } }), { status, headers: responseHeaders });
 }
+const loopbackHosts = ["localhost", "127.0.0.1", "[::1]"];
 function secureOrigin(origin: URL) {
-  return origin.protocol === "https:" || (origin.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
+  return origin.protocol === "https:" || (origin.protocol === "http:" && loopbackHosts.includes(origin.hostname));
 }
 function validateOrigin(request: Request, publicOrigin?: string) {
   const url = new URL(request.url), rawOrigin = request.headers.get("origin");
@@ -33,8 +34,11 @@ function validateOrigin(request: Request, publicOrigin?: string) {
     if (configured !== parsed.origin || !secureOrigin(parsed)) throw new RelayFailure("RELAY_CONFIGURATION", 503);
     configuredOrigin = parsed.origin;
   }
+  // NextRequest canonicalizes loopback URLs; only the exact browser Host can restore their origin.
+  const normalizedLoopback = loopbackHosts.includes(url.hostname) && loopbackHosts.includes(origin.hostname) &&
+    url.protocol === origin.protocol && url.port === origin.port && request.headers.get("host") === origin.host;
   // Never trust X-Forwarded-Host/Origin to widen the allowed target.
-  if (!secureOrigin(origin) || rawOrigin !== origin.origin || (origin.origin !== url.origin && origin.origin !== configuredOrigin) || (request.headers.has("host") && request.headers.get("host") !== origin.host)) throw new RelayFailure("ORIGIN_REJECTED", 403);
+  if (!secureOrigin(origin) || rawOrigin !== origin.origin || (origin.origin !== url.origin && origin.origin !== configuredOrigin && !normalizedLoopback) || (request.headers.has("host") && request.headers.get("host") !== origin.host)) throw new RelayFailure("ORIGIN_REJECTED", 403);
   const site = request.headers.get("sec-fetch-site");
   if (site && site !== "same-origin") throw new RelayFailure("ORIGIN_REJECTED", 403);
   if (request.headers.get("x-laya-relay") !== "1") throw new RelayFailure("ORIGIN_REJECTED", 403);

@@ -1,6 +1,7 @@
 import type { FieldState, Json } from "../models";
 import { PlatformError } from "./base";
 export type FetchLike = typeof fetch;
+export type OperationSignal = () => AbortSignal | undefined;
 type RequestOptions = {
   params?: Record<string, unknown>;
   headers?: Record<string, string>;
@@ -12,12 +13,15 @@ export class ReadOnlyHTTP {
     readonly routes: Record<string, [string, RegExp][]>,
     readonly transport: FetchLike = fetch,
     readonly retries = 2,
+    readonly getSignal?: OperationSignal,
   ) {}
   async request(
     method: string,
     input: string,
     options: RequestOptions = {},
   ): Promise<any> {
+    const operationSignal = this.getSignal?.();
+    operationSignal?.throwIfAborted();
     const url = new URL(input);
     const allowed = this.routes[url.origin]?.some(
       ([verb, pattern]) => verb === method && pattern.test(url.pathname),
@@ -59,13 +63,14 @@ export class ReadOnlyHTTP {
         : {}),
     };
     for (let attempt = 0; attempt <= this.retries; attempt++) {
+      operationSignal?.throwIfAborted();
       let response: Response;
       try {
         response = await this.transport(url, {
           method,
           headers,
           redirect: "manual",
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.any([AbortSignal.timeout(30000), ...(operationSignal ? [operationSignal] : [])]),
           ...(options.json !== undefined
             ? { body: JSON.stringify(options.json) }
             : {}),
@@ -73,9 +78,11 @@ export class ReadOnlyHTTP {
             ? { body: new URLSearchParams(options.form).toString() }
             : {}),
         });
-      } catch {
+      } catch (error) {
+        operationSignal?.throwIfAborted();
+        if (error instanceof Error && error.name === "AbortError") throw error;
         if (attempt < this.retries) {
-          await delay(attempt);
+          await delay(100 * 2 ** attempt, operationSignal);
           continue;
         }
         throw new PlatformError(
@@ -89,6 +96,7 @@ export class ReadOnlyHTTP {
       } catch {
         payload = null;
       }
+      operationSignal?.throwIfAborted();
       const code =
         typeof payload?.error === "object"
           ? payload.error?.code
@@ -101,13 +109,11 @@ export class ReadOnlyHTTP {
         attempt < this.retries
       ) {
         const retry = response.headers.get("retry-after");
-        await new Promise((r) =>
-          setTimeout(
-            r,
-            retry && /^\d+$/.test(retry)
-              ? Math.min(Number(retry), 10) * 1000
-              : 100 * 2 ** attempt,
-          ),
+        await delay(
+          retry && /^\d+$/.test(retry)
+            ? Math.min(Number(retry), 10) * 1000
+            : 100 * 2 ** attempt,
+          operationSignal,
         );
         continue;
       }
@@ -163,8 +169,14 @@ export class ReadOnlyHTTP {
     throw new PlatformError("NETWORK_ERROR", "광고 API에 연결하지 못했습니다.");
   }
 }
-const delay = (attempt: number) =>
-  new Promise((resolve) => setTimeout(resolve, 100 * 2 ** attempt));
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const onAbort = () => { clearTimeout(timer); reject(signal!.reason); };
+    const timer = setTimeout(() => { signal?.removeEventListener("abort", onAbort); resolve(); }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 export const fieldState = (raw: Json, key: string): FieldState =>
   !(key in raw) ? "NOT_RETURNED" : raw[key] == null ? "NOT_SET" : "PRESENT";
 export function decimalValue(value: unknown, divisor = 1): string | null {

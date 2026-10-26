@@ -8,6 +8,7 @@ import { NAMES, saveCredentials } from "./credentials";
 import { queryNativeHistory } from "../server/history";
 import { PLATFORMS, type Json, type Settings } from "../server/models";
 import { loadPolicy, policyYaml } from "../server/policies/schema";
+import { customRuleResults } from "../server/policies/evaluation";
 import type { Policy } from "../contracts/policy";
 import { auditRulesSchema } from "../lib/audit-rules";
 import { emptyContext, type QueryContext } from "../server/query";
@@ -250,6 +251,7 @@ export function createApi(
   options: ApiOptions = {},
 ) {
   const sessions = new Map<string, BrowserSession>();
+  let contextRevision: number | undefined;
   const now = options.now ?? Date.now;
   const writer = options.credentialsWriter ?? saveCredentials;
   const maxSessions = options.maxSessions ?? 256,
@@ -258,6 +260,12 @@ export function createApi(
     typeof application === "function"
       ? application()
       : Promise.resolve(application);
+  const invalidateContexts = (activeTab: TabSession) => {
+    for (const storedSession of sessions.values()) for (const storedTab of storedSession.tabs.values()) {
+      storedTab.context = emptyContext(); storedTab.draft = null;
+    }
+    activeTab.context = emptyContext(); activeTab.draft = null;
+  };
   return async function handle(request: Request): Promise<Response> {
     let fresh: string | undefined;
     try {
@@ -325,10 +333,15 @@ export function createApi(
       const service = await app();
       const activeTab = tab;
       const response = await service.mutex.run(async () => {
-        const previousContext = structuredClone(activeTab.context), previousDraft = structuredClone(activeTab.draft);
+        service.assertAvailable();
+        let previousContext = structuredClone(activeTab.context), previousDraft = structuredClone(activeTab.draft);
         try { const result = await service.storage.atomic(async () => {
         setOperationSignal(request.signal);
-        if (service.hydratedRevision !== service.storage.revision) await service.initialize();
+        if (service.hydratedRevision !== service.storage.revision || (contextRevision !== undefined && contextRevision !== service.storage.revision)) {
+          await service.initialize();
+          invalidateContexts(activeTab);
+          previousContext = structuredClone(activeTab.context); previousDraft = null;
+        }
         if (method === "GET" && path === "/state") {
           const scope = validateScope(
             parsed(scopeSchema, {
@@ -604,7 +617,6 @@ export function createApi(
                 name: "규칙 검증",
                 rules: [draft.rule],
               });
-          const { customRuleResults } = await import("../server/policies");
           const selected = service.entities.filter(
             (entity) =>
               (!scope.platforms?.length ||
@@ -707,11 +719,14 @@ export function createApi(
         throw new ApiError(404, "요청한 기능을 찾을 수 없습니다.");
       }, { signal: request.signal });
           service.hydratedRevision = service.storage.revision;
+          contextRevision = service.storage.revision;
           return result;
         } catch (error) {
           activeTab.context = previousContext; activeTab.draft = previousDraft;
           await service.storage.reload();
+          if (contextRevision !== undefined && contextRevision !== service.storage.revision) invalidateContexts(activeTab);
           await service.initialize();
+          contextRevision = service.storage.revision;
           throw error;
         } finally { setOperationSignal(); }
       });

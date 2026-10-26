@@ -21,6 +21,7 @@ import {
   timestamp,
   validateHistoryRange,
   type FetchLike,
+  type OperationSignal,
 } from "./http";
 import { validateApiEntity } from "./contracts";
 
@@ -66,6 +67,7 @@ export class MetaAdapter extends BaseAdapter {
       api_version?: string;
       currency_offset?: number;
       fetch?: FetchLike;
+      getSignal?: OperationSignal;
     } = {},
   ) {
     super();
@@ -90,6 +92,8 @@ export class MetaAdapter extends BaseAdapter {
         ],
       },
       options.fetch,
+      undefined,
+      options.getSignal,
     );
   }
   private currencyOffset?: number;

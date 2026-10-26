@@ -27,6 +27,8 @@ export function validateSettings(input: Json): Settings {
     value.semantic_threshold < 0.5 ||
     value.semantic_threshold > 1 ||
     typeof value.preload_model !== "boolean" ||
+    typeof value.timezone !== "string" ||
+    value.timezone.length < 1 || value.timezone.length > 100 ||
     !DateTime.now().setZone(value.timezone).isValid
   )
     throw new Error("판단 기준과 시간대 설정을 확인해 주세요.");
