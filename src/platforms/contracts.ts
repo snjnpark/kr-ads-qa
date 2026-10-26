@@ -1,5 +1,5 @@
 /** Validate observed API fields before coercion; omitted/null fields stay distinct. */
-import type { Json, Platform } from "../models";
+import type { Json, Platform } from "../domain/entities";
 import { identity, object, PlatformError } from "./base";
 import { decimalValue } from "./http";
 

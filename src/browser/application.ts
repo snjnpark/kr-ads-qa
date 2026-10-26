@@ -9,37 +9,37 @@ import {
   type Entity,
   type Json,
   type Settings,
-} from "../server/models";
+} from "../domain/entities";
 import { BrowserStorage as Storage, type StorageSnapshot } from "./storage";
 
 import {
   asPlatformError,
   PlatformError,
   type AdsPlatformAdapter,
-} from "../server/platforms/base";
+} from "../platforms/base";
 import { BrowserLayaEngine as LayaEngine } from "./model/engine";
 import {
   BrowserPolicyManager as PolicyManager,
 } from "./policies";
-import { resolveParent } from "../server/policies/evaluation";
-import { QAEngine, RULES } from "../server/qa";
-import { PRODUCT_RULES } from "../server/product-qa";
-import { SnapshotManager, compareSnapshots } from "../server/history";
+import { resolveParent } from "../domain/policies/evaluation";
+import { QAEngine, RULES } from "../domain/qa/qa";
+import { PRODUCT_RULES } from "../domain/qa/product-qa";
+import { SnapshotManager, compareSnapshots } from "../domain/history";
 import {
   emptyContext,
   type QueryContext,
-} from "../server/query";
+} from "../domain/query/query";
 
 import { enabledAuditRuleIds } from "../lib/audit-rules";
-import { FrequencyAnomalyDetector } from "../server/anomaly";
+import { FrequencyAnomalyDetector } from "../domain/qa/anomaly";
 import { productCode, productLabel } from "../lib/ad-products";
 
 export type { Scope } from "../contracts/domain";
 import type { Scope } from "../contracts/domain";
 
 import { validateSettings } from "./settings";
-export { validateScope } from "../server/application/scope";
-import { selected, scopeKey } from "../server/application/scope";
+export { validateScope } from "../domain/scope";
+import { selected, scopeKey } from "../domain/scope";
 export class Mutex {
   private tail: Promise<unknown> = Promise.resolve();
   run<T>(operation: () => Promise<T> | T): Promise<T> {

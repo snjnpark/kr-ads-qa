@@ -1,5 +1,5 @@
-import type { QueryContext } from "../../server/query";
-import { QueryModelError, type interpretQuery } from "../../server/query-model";
+import type { QueryContext } from "../../domain/query/query";
+import { QueryModelError, type interpretQuery } from "../../domain/query/query-model";
 import { MODEL_RELEASE, MODEL_TOTAL_BYTES } from "./cache";
 import { MODEL_VERSION } from "./model-version";
 import type { Decision, SemanticInput, ModelProgress, EngineSettings, WorkerRequest, WorkerResponse } from "./protocol";

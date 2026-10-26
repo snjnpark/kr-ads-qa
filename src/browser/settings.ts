@@ -1,5 +1,5 @@
 import { DateTime } from "luxon";
-import { DEFAULT_SETTINGS, type Json, type Settings } from "../server/models";
+import { DEFAULT_SETTINGS, type Json, type Settings } from "../domain/entities";
 import { LEGACY_DATASET_NAMES } from "../lib/settings-compatibility";
 import type { BrowserStorage } from "./storage";
 let storage: BrowserStorage;

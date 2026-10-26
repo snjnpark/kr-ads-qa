@@ -1,7 +1,7 @@
 import { PLATFORMS } from "../contracts/domain";
 import { auditRulesSchema } from "../lib/audit-rules";
-import { createEntity } from "../server/models";
-import { loadPolicy } from "../server/policies/schema";
+import { createEntity } from "../domain/entities";
+import { loadPolicy } from "../domain/policies/schema";
 import { BrowserStorage, validateStorageSnapshot, type StorageSnapshot } from "./storage";
 import { validateSettings } from "./settings";
 

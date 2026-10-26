@@ -1,4 +1,4 @@
-import { QueryModelError } from "../../server/query-model";
+import { QueryModelError } from "../../domain/query/query-model";
 import { BrowserModelCore } from "./engine-core";
 import type { WorkerRequest, WorkerResponse } from "./protocol";
 const worker = globalThis as unknown as { postMessage(value: WorkerResponse): void; onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null };

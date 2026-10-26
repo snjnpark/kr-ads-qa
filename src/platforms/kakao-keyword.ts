@@ -1,4 +1,4 @@
-import { createEntity, type Entity, type FieldState, type Json } from "../models";
+import { createEntity, type Entity, type FieldState, type Json } from "../domain/entities";
 import { asPlatformError, BaseAdapter, identity, object, PartialFetchError, PlatformError } from "./base";
 import { validateApiEntity } from "./contracts";
 import { decimalValue, fieldState, ReadOnlyHTTP, timestamp, type FetchLike, type OperationSignal } from "./http";

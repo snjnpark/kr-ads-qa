@@ -3,7 +3,7 @@ import {
   type Entity,
   type FieldState,
   type Json,
-} from "../models";
+} from "../domain/entities";
 import {
   asPlatformError,
   BaseAdapter,

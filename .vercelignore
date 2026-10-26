@@ -56,3 +56,8 @@ src/server/condition-classifier.ts
 __pycache__
 .venv
 venv
+
+# Local compatibility for frozen corpus imports; canonical public source lives in domain.
+src/server/models.ts
+src/server/query.ts
+src/server/query-model.ts

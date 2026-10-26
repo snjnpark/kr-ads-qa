@@ -1,6 +1,6 @@
 import type { ChoiceQuestion } from "./types";
-import type { QueryContext } from "../../server/query";
-import { interpretQuery } from "../../server/query-model";
+import type { QueryContext } from "../../domain/query/query";
+import { interpretQuery } from "../../domain/query/query-model";
 import type { ModelLoadOptions } from "./cache";
 import { MODEL_VERSION } from "./model-version";
 import { QUESTION_SCHEMA_VERSION } from "./identity";

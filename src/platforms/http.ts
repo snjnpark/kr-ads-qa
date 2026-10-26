@@ -1,4 +1,4 @@
-import type { FieldState, Json } from "../models";
+import type { FieldState, Json } from "../domain/entities";
 import { PlatformError } from "./base";
 export type FetchLike = typeof fetch;
 export type OperationSignal = () => AbortSignal | undefined;

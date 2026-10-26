@@ -1,6 +1,6 @@
-import type { Entity, Json, ResultStatus } from "./models";
-import { observe } from "./policies/evaluation";
-import { productCode } from "../lib/ad-products";
+import type { Entity, Json, ResultStatus } from "../entities";
+import { observe } from "../policies/evaluation";
+import { productCode } from "../../lib/ad-products";
 
 export const PRODUCT_RULES: Record<string, { label: string; base: string }> = {
   PRODUCT_APP: { label: "앱 캠페인의 앱·스토어 연결", base: "CREATIVE_001" },

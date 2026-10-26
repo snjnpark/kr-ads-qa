@@ -1,6 +1,6 @@
-import { PLATFORMS, type Entity, type Json } from "../models";
-import type { Scope } from "../../contracts/domain";
-import { AD_PRODUCTS, productKey } from "../../lib/ad-products";
+import { PLATFORMS, type Entity, type Json } from "./entities";
+import type { Scope } from "../contracts/domain";
+import { AD_PRODUCTS, productKey } from "../lib/ad-products";
 
 export function validateScope(input: Json): Scope {
   const scope: Scope = {};

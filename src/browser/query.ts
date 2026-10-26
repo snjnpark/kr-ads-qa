@@ -1,14 +1,14 @@
 const randomUUID = () => crypto.randomUUID();
 import type { BrowserApplication as Application } from "./application";
-import type { Entity, Json } from "../server/models";
+import type { Entity, Json } from "../domain/entities";
 import type { Scope } from "../contracts/domain";
 import { semanticIdentity } from "./model/identity";
 import type { SemanticInput } from "./model/protocol";
-import { observe } from "../server/policies/evaluation";
-import { decimal } from "../server/policies/values";
-import { execute, emptyContext, dateRange, type QueryContext } from "../server/query";
-import { QueryModelError, type QueryTrace } from "../server/query-model";
-import { selected, scopeKey } from "../server/application/scope";
+import { observe } from "../domain/policies/evaluation";
+import { decimal } from "../domain/policies/values";
+import { execute, emptyContext, dateRange, type QueryContext } from "../domain/query/query";
+import { QueryModelError, type QueryTrace } from "../domain/query/query-model";
+import { selected, scopeKey } from "../domain/scope";
 
 export type QueryResponse = Json & {
   rows: Json[];

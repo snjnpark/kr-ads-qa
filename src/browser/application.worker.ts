@@ -4,7 +4,7 @@ import { configureCredentials } from "./credentials";
 import { createBrowserApplication, runtimeInfo } from "@browser-runtime";
 import { createApi } from "./api";
 import { exportBrowserBackup, parseBrowserBackup } from "./backup";
-import { loadPolicy } from "../server/policies/schema";
+import { loadPolicy } from "../domain/policies/schema";
 import defaultPolicy from "./default-policy.json";
 
 const scope = globalThis as unknown as { onmessage: (event: MessageEvent<Call>) => void; postMessage(value: unknown): void };

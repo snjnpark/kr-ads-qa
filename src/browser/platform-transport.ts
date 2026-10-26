@@ -1,12 +1,12 @@
 import type { Platform } from "../contracts/domain";
-import type { AdsPlatformAdapter } from "../server/platforms/base";
-import { PlatformError } from "../server/platforms/base";
-import { MetaAdapter } from "../server/platforms/meta";
-import { NaverAdapter } from "../server/platforms/naver";
-import { KakaoAdapter } from "../server/platforms/kakao";
-import { KakaoKeywordAdapter } from "../server/platforms/kakao-keyword";
-import { GoogleAdapter } from "../server/platforms/google";
-import type { OperationSignal } from "../server/platforms/http";
+import type { AdsPlatformAdapter } from "../platforms/base";
+import { PlatformError } from "../platforms/base";
+import { MetaAdapter } from "../platforms/meta";
+import { NaverAdapter } from "../platforms/naver";
+import { KakaoAdapter } from "../platforms/kakao";
+import { KakaoKeywordAdapter } from "../platforms/kakao-keyword";
+import { GoogleAdapter } from "../platforms/google";
+import type { OperationSignal } from "../platforms/http";
 import { buildRelayRequest, relayOperation, type RelayPlatform, type RelayRequest } from "../relay/contract";
 
 export const BROWSER_CREDENTIAL_FIELDS: Record<Platform, readonly string[]> = {

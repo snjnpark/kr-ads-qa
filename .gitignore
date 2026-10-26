@@ -80,3 +80,8 @@ desktop.ini
 /public/models/
 /.laya-model-downloads/
 /.vercel/
+
+# Local compatibility for frozen corpus imports; canonical public source lives in domain.
+/src/server/models.ts
+/src/server/query.ts
+/src/server/query-model.ts

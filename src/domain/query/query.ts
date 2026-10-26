@@ -1,9 +1,9 @@
 import Decimal from "decimal.js";
 import { DateTime } from "luxon";
-import type { Entity, Platform } from "./models";
-import { observe, resolveParent } from "./policies/evaluation";
-import { compareValue } from "./policies/values";
-import { excludedAdProduct, literalProducts, productKey, queryScopeText } from "../lib/ad-products";
+import type { Entity, Platform } from "../entities";
+import { observe, resolveParent } from "../policies/evaluation";
+import { compareValue } from "../policies/values";
+import { excludedAdProduct, literalProducts, productKey, queryScopeText } from "../../lib/ad-products";
 
 export class Clarification extends Error {}
 export type Filter = { field: string; operator: string; value?: unknown };

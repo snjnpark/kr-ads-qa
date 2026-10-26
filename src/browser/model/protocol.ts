@@ -1,5 +1,5 @@
-import type { QueryTrace } from "../../server/query-model";
-import type { QueryContext } from "../../server/query";
+import type { QueryTrace } from "../../domain/query/query-model";
+import type { QueryContext } from "../../domain/query/query";
 import type { Decision, SemanticInput } from "./engine-core";
 import type { ModelProgress } from "./types";
 export type EngineSettings = { threshold?: number; margin?: number; batchSize?: number; baseUrl?: string };

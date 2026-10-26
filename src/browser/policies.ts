@@ -1,7 +1,7 @@
 import { PLATFORMS, type Platform } from "../contracts/domain";
 import type { Policy } from "../contracts/policy";
 import { defaultAuditRules, auditRulesSchema, type AuditRuleConfiguration } from "../lib/audit-rules";
-import { loadPolicy, policyYaml } from "../server/policies/schema";
+import { loadPolicy, policyYaml } from "../domain/policies/schema";
 import type { BrowserStorage } from "./storage";
 
 /** Policy writes join the surrounding BrowserStorage.atomic commit. */

@@ -1,6 +1,6 @@
 import * as ort from "onnxruntime-web/wasm";
 import { createConditionAgent, type ConditionInput } from "./condition-agent";
-import { CONDITION_LEXICAL_WIDTH, conditionTextFeatures } from "../../server/condition-features";
+import { CONDITION_LEXICAL_WIDTH, conditionTextFeatures } from "../../domain/query/condition-features";
 import { buildChoiceSequence, softmax, temperatureFor } from "./sequence";
 import { loadModelFiles, MODEL_RELEASE, MODEL_TOTAL_BYTES, type ModelLoadOptions } from "./cache";
 import type { ModelConfig, TypedAgent, ModelResult } from "./types";

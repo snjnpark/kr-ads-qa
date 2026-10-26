@@ -1,6 +1,6 @@
 import type { Entity, FieldState, ResultStatus } from "../../contracts/domain";
 import type { Operator, Predicate, Policy } from "../../contracts/policy";
-import { entityKey } from "../models";
+import { entityKey } from "../entities";
 import { activePolicyRules } from "../../lib/policy-conditions";
 import { compareValue } from "./values";
 

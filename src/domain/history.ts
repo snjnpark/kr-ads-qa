@@ -8,13 +8,18 @@ import {
   type Entity,
   type NativeEvent,
   type Platform,
-} from "./models";
+} from "./entities";
 import { decimal, deepEqual } from "./policies/values";
 import { observe } from "./policies/evaluation";
-import type { BrowserStorage } from "../browser/storage";
-type Storage = Pick<BrowserStorage, "get" | "put" | "list" | "delete">;
+import type { Json } from "../contracts/domain";
+type Storage = {
+  get<T = Json>(table: string, key: string): T | null;
+  put(table: string, key: string, data: Json): void;
+  list<T = Json>(table: string): T[];
+  delete(table: string, key: string): void;
+};
 import { productKey } from "../lib/ad-products";
-import { PlatformError } from "./platforms/base";
+import { PlatformError } from "../platforms/base";
 
 export type { Scope as SnapshotScope } from "../contracts/domain";
 import type { Scope as SnapshotScope } from "../contracts/domain";

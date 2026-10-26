@@ -1,4 +1,4 @@
-import { createEntity, type Entity, type Json } from "../server/models";
+import { createEntity, type Entity, type Json } from "../domain/entities";
 
 // Credentials, query sessions and model input caches intentionally have no store.
 export const TABLES = [

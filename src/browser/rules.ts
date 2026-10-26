@@ -3,7 +3,7 @@ import Decimal from "decimal.js";
 import { DateTime } from "luxon";
 import { stringify } from "yaml";
 import type { Policy, Rule } from "../contracts/policy";
-import { loadPolicy } from "../server/policies/schema";
+import { loadPolicy } from "../domain/policies/schema";
 import { BrowserPolicyManager as PolicyManager } from "./policies";
 
 export type Classification = {

@@ -4,7 +4,7 @@ import {
   type FieldState,
   type Json,
   type NativeEvent,
-} from "../models";
+} from "../domain/entities";
 import {
   asPlatformError,
   BaseAdapter,

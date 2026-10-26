@@ -1,18 +1,18 @@
-import type { Entity, Json, ResultStatus } from "./models";
-import type { Policy } from "../contracts/policy";
-import { decimal } from "./policies/values";
-import { loadPolicy } from "./policies/schema";
+import type { Entity, Json, ResultStatus } from "../entities";
+import type { Policy } from "../../contracts/policy";
+import { decimal } from "../policies/values";
+import { loadPolicy } from "../policies/schema";
 import {
   customRuleResults,
   effectiveBudget,
   observe,
   resolveParent,
   type Observed,
-} from "./policies/evaluation";
+} from "../policies/evaluation";
 
-import { RULES } from "../lib/audit-rules";
+import { RULES } from "../../lib/audit-rules";
 import { productRuleResults } from "./product-qa";
-export { RULES } from "../lib/audit-rules";
+export { RULES } from "../../lib/audit-rules";
 
 const ACTIVE = new Set(["ACTIVE", "ENABLED", "ON", "ELIGIBLE", "NORMAL"]);
 const INACTIVE = new Set([

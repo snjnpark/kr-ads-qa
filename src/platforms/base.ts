@@ -1,4 +1,4 @@
-import type { Account, Entity, Json, NativeEvent, Platform } from "../models";
+import type { Account, Entity, Json, NativeEvent, Platform } from "../domain/entities";
 export class PlatformError extends Error {
   partial_entities: Entity[] = [];
   partial_accounts: Account[] = [];

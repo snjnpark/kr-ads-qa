@@ -1,8 +1,8 @@
 import Decimal from "decimal.js";
-import { z } from "../lib/validation";
-import type { ChoiceQuestion } from "../browser/model/types";
-import { PLATFORMS } from "./models";
-import { literalProducts, unquotedAdText, queryScopeText } from "../lib/ad-products";
+import { z } from "../../lib/validation";
+import type { ChoiceQuestion } from "../../browser/model/types";
+import { PLATFORMS } from "../entities";
+import { literalProducts, unquotedAdText, queryScopeText } from "../../lib/ad-products";
 import { ACTIVE, INACTIVE, Clarification, dateRange, type Query, type QueryContext } from "./query";
 
 import { queryLiteralScope, literalListOperation, queryRequestRemainder, childEntity, descendantType, assertEntityCapabilities } from "./query-scope";

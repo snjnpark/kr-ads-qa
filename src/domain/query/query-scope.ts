@@ -1,6 +1,6 @@
 import { literalProducts, queryIntroduction, stripAdProductMentions, unquotedAdText, queryScopeText, ProductScopeError, adVendorSpans, adProductSpans,
-  ownedAdSpans, coordinatedAdExclusions, AD_SCOPE_COORDINATION as coordination, AD_SCOPE_EXCLUSION as excluded } from "../lib/ad-products";
-import { PLATFORMS } from "./models";
+  ownedAdSpans, coordinatedAdExclusions, AD_SCOPE_COORDINATION as coordination, AD_SCOPE_EXCLUSION as excluded } from "../../lib/ad-products";
+import { PLATFORMS } from "../entities";
 import { Clarification } from "./query";
 import type { QueryPlan } from "./query-model";
 import { queryCarrierOperation } from "./query-evidence";

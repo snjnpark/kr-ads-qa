@@ -1,4 +1,4 @@
-import { excludedAdProduct, performanceMetricText, precedingQuotedName, queryScopeText } from "../lib/ad-products";
+import { excludedAdProduct, performanceMetricText, precedingQuotedName, queryScopeText } from "../../lib/ad-products";
 import type { QueryContext } from "./query";
 import type { QueryPlan } from "./query-model";
 import { queryLiteralScope } from "./query-scope";

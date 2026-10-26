@@ -1,5 +1,5 @@
 import type { QueryPlan } from "./query-model";
-import { queryScopeText } from "../lib/ad-products";
+import { queryScopeText } from "../../lib/ad-products";
 import { ACTIVE, INACTIVE } from "./query";
 
 type FieldId = "daily" | "lifetime" | "status" | "end" | "name" | "created" | "id";

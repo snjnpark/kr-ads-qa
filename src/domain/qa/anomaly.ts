@@ -1,6 +1,6 @@
-import type { Entity, Json } from "./models";
-import { decimal } from "./policies/values";
-import { observe } from "./policies/evaluation";
+import type { Entity, Json } from "../entities";
+import { decimal } from "../policies/values";
+import { observe } from "../policies/evaluation";
 
 export const ANOMALY_FIELDS = new Set([
   "optimization.objective",
