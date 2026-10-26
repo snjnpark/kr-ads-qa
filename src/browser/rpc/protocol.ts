@@ -4,6 +4,7 @@ import { NAMES } from "../credentials";
 import { PLATFORMS } from "../../domain/entities";
 import { policyYaml } from "../../domain/policies/schema";
 import type { Policy } from "../../contracts/policy";
+import { INTEGER_SETTING_RANGES, SEMANTIC_THRESHOLD_RANGE, TIMEZONE_LENGTH_RANGE, SETTINGS_PATH_MAX_LENGTH } from "../settings";
 
 export const MAX_BODY_BYTES = 2_000_000;
 const COOKIE_NAME = "laya_browser_session";
@@ -163,19 +164,20 @@ export const syncSchema = z.strictObject({
 });
 export const policyText = z.strictObject({ yaml: z.string().min(1).max(1_000_000) });
 export const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
+const { cache_ttl_seconds, batch_size, snapshot_interval_seconds, cpu_threads } = INTEGER_SETTING_RANGES;
 export const settingsSchema = z.strictObject({
   mode: z.literal("live").optional(),
   ai_mode: z.literal("laya").optional(),
   mock_dataset: z.never().optional(),
-  cache_ttl_seconds: z.number().int().min(0).max(86400).optional(),
-  batch_size: z.number().int().min(1).max(256).optional(),
-  semantic_threshold: z.number().min(0.5).max(1).optional(),
-  timezone: z.string().min(1).max(100).optional(),
-  snapshot_interval_seconds: z.number().int().min(0).max(604800).optional(),
+  cache_ttl_seconds: z.number().int().min(cache_ttl_seconds[0]).max(cache_ttl_seconds[1]).optional(),
+  batch_size: z.number().int().min(batch_size[0]).max(batch_size[1]).optional(),
+  semantic_threshold: z.number().min(SEMANTIC_THRESHOLD_RANGE[0]).max(SEMANTIC_THRESHOLD_RANGE[1]).optional(),
+  timezone: z.string().min(TIMEZONE_LENGTH_RANGE[0]).max(TIMEZONE_LENGTH_RANGE[1]).optional(),
+  snapshot_interval_seconds: z.number().int().min(snapshot_interval_seconds[0]).max(snapshot_interval_seconds[1]).optional(),
   preload_model: z.boolean().optional(),
   inference_backend: z.literal("onnx").optional(),
-  onnx_directory: z.string().min(1).max(1024).optional(),
-  cpu_threads: z.number().int().min(1).max(64).optional(),
+  onnx_directory: z.string().min(1).max(SETTINGS_PATH_MAX_LENGTH).optional(),
+  cpu_threads: z.number().int().min(cpu_threads[0]).max(cpu_threads[1]).optional(),
 });
 export const policyData = (policy: Policy) => ({
   ...policy,

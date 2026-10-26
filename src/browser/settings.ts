@@ -2,6 +2,15 @@ import { DateTime } from "luxon";
 import { DEFAULT_SETTINGS, type Json, type Settings } from "../domain/entities";
 import { LEGACY_DATASET_NAMES } from "../lib/settings-compatibility";
 import type { BrowserStorage } from "./storage";
+export const INTEGER_SETTING_RANGES = {
+  cache_ttl_seconds: [0, 86400],
+  batch_size: [1, 256],
+  snapshot_interval_seconds: [0, 604800],
+  cpu_threads: [1, 64],
+} as const;
+export const SEMANTIC_THRESHOLD_RANGE = [0.5, 1] as const;
+export const TIMEZONE_LENGTH_RANGE = [1, 100] as const;
+export const SETTINGS_PATH_MAX_LENGTH = 1024;
 let storage: BrowserStorage;
 export function configureSettings(value: BrowserStorage) { storage = value; }
 export function validateSettings(input: Json): Settings {
@@ -13,22 +22,18 @@ export function validateSettings(input: Json): Settings {
     value.inference_backend !== "onnx"
   )
     throw new Error("실행 모드를 확인해 주세요.");
-  for (const [key, min, max] of [
-    ["cache_ttl_seconds", 0, 86400],
-    ["batch_size", 1, 256],
-    ["snapshot_interval_seconds", 0, 604800],
-    ["cpu_threads", 1, 64],
-  ] as const) {
+  for (const key of ["cache_ttl_seconds", "batch_size", "snapshot_interval_seconds", "cpu_threads"] as const) {
+    const [min, max] = INTEGER_SETTING_RANGES[key];
     if (!Number.isInteger(value[key]) || value[key] < min || value[key] > max)
       throw new Error(`${key} 설정 범위를 확인해 주세요.`);
   }
   if (
     !Number.isFinite(value.semantic_threshold) ||
-    value.semantic_threshold < 0.5 ||
-    value.semantic_threshold > 1 ||
+    value.semantic_threshold < SEMANTIC_THRESHOLD_RANGE[0] ||
+    value.semantic_threshold > SEMANTIC_THRESHOLD_RANGE[1] ||
     typeof value.preload_model !== "boolean" ||
     typeof value.timezone !== "string" ||
-    value.timezone.length < 1 || value.timezone.length > 100 ||
+    value.timezone.length < TIMEZONE_LENGTH_RANGE[0] || value.timezone.length > TIMEZONE_LENGTH_RANGE[1] ||
     !DateTime.now().setZone(value.timezone).isValid
   )
     throw new Error("판단 기준과 시간대 설정을 확인해 주세요.");
@@ -36,7 +41,7 @@ export function validateSettings(input: Json): Settings {
     if (
       typeof value[key] !== "string" ||
       !value[key].trim() ||
-      value[key].length > 1024
+      value[key].length > SETTINGS_PATH_MAX_LENGTH
     )
       throw new Error("저장 위치를 확인해 주세요.");
   if (value.mode !== "live" || value.ai_mode !== "laya")
