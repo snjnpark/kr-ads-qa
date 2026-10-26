@@ -65,6 +65,19 @@ Meta, 네이버 검색광고, Google Ads, 카카오모먼트, 카카오 프리�
 
 로컬 Windows/Chromium에서 공개 파일만 복사한 운영 빌드·브라우저 동작·모델 실행을 검증했습니다. 실제 광고 계정 인증·CORS·쿼터와 원격 Vercel 서비스 운영 검증은 별도로 필요합니다.
 
+## 공개 소스 구성
+
+| 경로 | 책임 |
+|---|---|
+| `src/app` | 화면 진입점·전역 스타일·HTTP 경로 |
+| `src/features`·`src/components` | 기능별 화면·공통 UI |
+| `src/contracts`·`src/domain` | 데이터 계약·검색·QA·정책·이력 계산 |
+| `src/platforms` | 매체별 읽기 조회·응답 정규화 |
+| `src/browser` | Worker·IndexedDB·인증·백업·모델 실행 |
+| `src/relay`·`deployment` | 제한된 서버 중계·정적 모델 준비·배포 경계 검사 |
+
+셀프 호스팅과 호스팅 웹은 같은 프로덕션 구현을 사용합니다. 테스트 factory·합성 데이터·개발 문서와 로컬 호환 파일은 이 공개 구성에 포함하지 않습니다.
+
 ## 라이선스
 
 소스는 [MIT License](LICENSE)입니다. 원천 Laya 모델과 분리 학습 자산은 Apache-2.0 조건과 [모델 출처·변경 고지](public/LAYA_MODEL_NOTICE.txt)를 함께 제공합니다. 외부 라이브러리와 매체 자산에는 각 권리자의 조건이 적용됩니다. [자산 출처](NOTICE.md)도 확인하세요.

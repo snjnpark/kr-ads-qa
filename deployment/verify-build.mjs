@@ -13,7 +13,7 @@ function* files(directory) {
 const projectRoot = resolve(".");
 const dependencyRoot = existsSync("node_modules") ? realpathSync("node_modules") : resolve("node_modules");
 const outside = path => path === ".." || path.startsWith("../") || isAbsolute(path);
-const forbiddenProjectPath = /^(?:(?:testing|tests-ts|tests-integration|e2e|benchmarks|docs|data|output|config|\.laya-model-downloads)(?:\/|$)|(?:AGENTS|CLAUDE)\.md$|public\/models(?:\/|$)|policies\/local(?:\/|$)|src\/server\/(?:(?:api|application|ai|storage|credentials|rules|laya-bundle|model-release|condition-classifier|test-support-disabled)\.(?:ts|js)$|application\/|policies\/repository\.(?:ts|js)$|platforms\/index\.(?:ts|js)$))/i;
+const forbiddenProjectPath = /^(?:(?:testing|tests-ts|tests-integration|e2e|benchmarks|docs|data|output|config|\.laya-model-downloads)(?:\/|$)|(?:AGENTS|CLAUDE)\.md$|public\/models(?:\/|$)|policies\/local(?:\/|$)|src\/domain\/policies\.(?:ts|js)$|src\/server\/(?:(?:api|application|ai|storage|credentials|rules|laya-bundle|model-release|condition-classifier|test-disabled|test-support-disabled|models|query|query-model)\.(?:ts|js)$|application\/|policies\/repository\.(?:ts|js)$|platforms\/index\.(?:ts|js)$))/i;
 const forbiddenDependency = /(?:^|\/)node_modules\/(?:@playwright|onnxruntime-node|@napi-rs|@receptron)(?:\/|$)/i;
 function forbiddenTracePath(absolute) {
   const projectPath = relative(projectRoot, absolute).replaceAll("\\", "/");

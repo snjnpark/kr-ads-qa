@@ -85,3 +85,6 @@ desktop.ini
 /src/server/models.ts
 /src/server/query.ts
 /src/server/query-model.ts
+
+# Local-only policy export compatibility; public callers import canonical modules.
+/src/domain/policies.ts
