@@ -34,10 +34,12 @@ import {
   dateText,
   platforms,
 } from "@/components/shared";
-import { OverviewPage, AskPage, AuditPage } from "@/views/MainPages";
-import PoliciesPage from "@/views/PoliciesPage";
-import HistoryPage from "@/views/HistoryPage";
-import SettingsPage from "@/views/SettingsPage";
+import { AskPage } from "@/features/query/AskPage";
+import { AuditPage } from "@/features/audit/AuditPage";
+import OverviewPage from "@/features/overview/OverviewPage";
+import PoliciesPage from "@/features/policies/PoliciesPage";
+import HistoryPage from "@/features/history/HistoryPage";
+import SettingsPage from "@/features/settings/SettingsPage";
 import { api } from "@/lib/api";
 import { browserCall } from "@/browser/client";
 import { confirmDiscard } from "@/lib/navigation-guard";

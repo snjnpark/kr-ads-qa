@@ -1,3 +1,4 @@
+import { entityRows, withResultIdentity as resultIdentity, auditRows as resultRows } from "./application/rows";
 import { executeApplicationQuery, type QueryResponse } from "./query";
 export { actualConfiguration, type QueryResponse } from "./query";
 import { sha256 } from "./crypto";
@@ -21,7 +22,7 @@ import { BrowserLayaEngine as LayaEngine } from "./model/engine";
 import {
   BrowserPolicyManager as PolicyManager,
 } from "./policies";
-import { resolveParent } from "../domain/policies/evaluation";
+
 import { QAEngine, RULES } from "../domain/qa/qa";
 import { PRODUCT_RULES } from "../domain/qa/product-qa";
 import { SnapshotManager, compareSnapshots } from "../domain/history";
@@ -32,7 +33,6 @@ import {
 
 import { enabledAuditRuleIds } from "../lib/audit-rules";
 import { FrequencyAnomalyDetector } from "../domain/qa/anomaly";
-import { productCode, productLabel } from "../lib/ad-products";
 
 export type { Scope } from "../contracts/domain";
 import type { Scope } from "../contracts/domain";
@@ -291,69 +291,8 @@ export class BrowserApplication {
     if (!Number.isFinite(age) || age < 0 || age >= this.settings.cache_ttl_seconds * 1000 || this.scope !== scopeKey(scope))
       await this.sync(scope);
   }
-  private rowIdentity(entity: Entity, entities = this.entities): Json {
-    const ancestors: Entity[] = [entity],
-      visited = new Set<string>();
-    let current: Entity | null = entity;
-    while (current?.parent_id && !visited.has(current.key)) {
-      visited.add(current.key);
-      current = resolveParent(current, entities);
-      if (current) ancestors.push(current);
-    }
-    const campaign = ancestors.find((item) => item.entity_type === "campaign"),
-      group = ancestors.find((item) =>
-        ["adgroup", "asset_group"].includes(item.entity_type),
-      ),
-      campaignId = campaign?.entity_id ?? group?.parent_id ?? "",
-      groupId = group?.entity_id ??
-        (["ad", "creative", "keyword"].includes(entity.entity_type)
-          ? entity.parent_id ?? ""
-          : ""),
-      embeddedCampaign = group?.platform === "kakao"
-        ? group.raw_data.campaign
-        : null,
-      campaignName = campaign?.name ??
-        (embeddedCampaign &&
-        String(embeddedCampaign.id) === campaignId &&
-        String(embeddedCampaign.adAccountId) === entity.account_id &&
-        typeof embeddedCampaign.name === "string"
-          ? embeddedCampaign.name
-          : "");
-    return {
-      account: entity.account_id,
-      product_type: productCode(entity),
-      product: productLabel(entity.platform, productCode(entity)),
-      account_id: entity.account_id,
-      account_name: this.catalog.get(`${entity.platform}/${entity.account_id}`)?.name ?? "",
-      target_type: entity.entity_type,
-      type: entity.entity_type,
-      campaign_id: campaignId,
-      campaign_name: campaignName,
-      ad_group_id: groupId,
-      ad_group_name: group?.name ?? "",
-      campaign: campaignName,
-      adgroup: group?.name ?? "",
-    };
-  }
-  rows(entities = this.entities): Json[] {
-    return entities.map((e) => {
-      return {
-        key: e.key,
-        platform: e.platform,
-        product_type: productCode(e),
-        product: productLabel(e.platform, productCode(e)),
-        ...this.rowIdentity(e),
-        name: e.name,
-        id: e.entity_id,
-        status: e.status ?? "미조회",
-        daily_budget: e.budget.daily ?? "—",
-        currency: e.currency,
-        fetched_at: e.fetched_at,
-        result: "",
-        reason: "광고 설정 조회",
-      };
-    });
-  }
+
+  rows(entities = this.entities): Json[] { return entityRows(this, entities); }
   state() {
     const audits = this.storage
       .list<Json>("audit_runs")
@@ -469,48 +408,8 @@ export class BrowserApplication {
                 : "PASS",
     };
   }
-  private withResultIdentity(result: Json, entities: Entity[]) {
-    const entity = entities.find((candidate) =>
-      candidate.key === result.evidence?.entity_key &&
-      candidate.platform === result.platform &&
-      candidate.account_id === result.account_id &&
-      candidate.entity_id === result.entity_id,
-    );
-    return entity
-      ? {
-          ...result,
-          evidence: { ...result.evidence, details: this.rowIdentity(entity, entities) },
-        }
-      : result;
-  }
-  auditRows(id: string, results: Json[]) {
-    return results.map((r, i) => ({
-      key: `${id}/${i}`,
-      platform: r.platform,
-      account: r.account_id,
-      account_id: r.account_id,
-      account_name: r.evidence?.details?.account_name,
-      target_type: r.evidence?.details?.target_type,
-      type: r.evidence?.details?.target_type,
-      campaign_id: r.evidence?.details?.campaign_id,
-      campaign_name: r.evidence?.details?.campaign_name,
-      campaign: r.evidence?.details?.campaign_name,
-      ad_group_id: r.evidence?.details?.ad_group_id,
-      ad_group_name: r.evidence?.details?.ad_group_name,
-      adgroup: r.evidence?.details?.ad_group_name,
-      name: r.entity_name,
-      id: r.entity_id,
-      status: r.status,
-      result: r.status,
-      rule_id: r.rule_id,
-      severity: r.severity,
-      expected: r.expected,
-      actual: r.actual,
-      reason: r.evidence?.rule_description ?? r.rule_id,
-      evidence: r.evidence,
-      fetched_at: r.checked_at,
-    }));
-  }
+  private withResultIdentity(result: Json, entities: Entity[]) { return resultIdentity(this, result, entities); }
+  auditRows(id: string, results: Json[]) { return resultRows(id, results); }
   getAudit(id: string) {
     const run = this.storage.get<Json>("audit_runs", id),
       data = this.storage.get<Json>("audit_results", id);

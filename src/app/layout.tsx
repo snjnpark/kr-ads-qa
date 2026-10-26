@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import AppShell from "@/AppShell";
+import AppShell from "@/features/shell/AppShell";
 import NavigationGuard from "@/components/NavigationGuard";
 import "./globals.css";
 export const metadata: Metadata = {
