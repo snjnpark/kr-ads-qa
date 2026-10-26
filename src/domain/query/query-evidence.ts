@@ -1,5 +1,5 @@
 import type { QueryPlan } from "./query-model";
-import { queryScopeText } from "../../lib/ad-products";
+import { queryScopeText, stripAdProductMentions } from "../../lib/ad-products";
 import { ACTIVE, INACTIVE } from "./query";
 
 type FieldId = "daily" | "lifetime" | "status" | "end" | "name" | "created" | "id";
@@ -15,12 +15,13 @@ type EvidenceOptions = {
   requestRemainder?: (text: string) => string;
   literalFacts?: GroundedQueryFilter[];
   semantic?: QueryPlan["semantic"];
+  operation?: QueryPlan["operation"];
 };
 const quoted = /"[^"]*"|'[^']*'|“[^”]*”|‘[^’]*’|`[^`]*`/gu;
 const mask = (text: string) => text.replace(quoted, value => " ".repeat(value.length));
 const prefix = /^(?:\s*(?:(?:설정값|항목|금액|값|칸|란)(?:에는|에서|이|가|은|는|을|를|에|의)?|(?:설정|지정|입력|기입)(?:이|가|은|는|을|를)|(?:에는|에서|이|가|은|는|을|를|에|도|아직|아예|:)))*\s*/u;
 const presenceForms: ["is_empty" | "is_not_empty", RegExp][] = [
-  ["is_empty", /^(?:미\s*설정|미입력|미기입|공란|누락(?:된)?|빈|비어\s*(?:있는|있음)?|비워\s*둔|비었(?:던|음)?|빠져\s*있는|빠진|없는|없음|없(?=거나|고|으면|으며|든)|(?:(?:설정|입력|지정|기입))?(?:되지|하지)\s*않(?:은|는)|(?:설정|입력|지정|기입)\s*안\s*(?:된|한)|(?:입력|설정|기입|기재|지정)해\s*(?:두|놓)지\s*않(?:은|는)|안\s*(?:잡은|잡힌|정한)|잡(?:히)?지\s*않은)/u],
+  ["is_empty", /^(?:미\s*설정|미입력|미기입|미기재(?:인)?|공란|누락(?:된)?|빈|비어\s*(?:있는|있음)?|비워\s*둔|비었(?:던|음)?|빠져\s*있는|빠진|없는|없음|없(?=거나|고|으면|으며|든)|(?:(?:설정|입력|지정|기입))?(?:되지|하지)\s*않(?:은|는)|(?:설정|입력|지정|기입)\s*안\s*(?:된|한)|(?:입력|설정|기입|기재|지정)해\s*(?:두|놓)지\s*않(?:은|는)|안\s*(?:잡은|잡힌|정한)|잡(?:히)?지\s*않은)/u],
   ["is_not_empty", /^(?:(?:입력|설정|지정|기입)(?:해\s*(?:둔|놓은)|되어\s*있(?:는|음|(?=고|거나|으며|으면))|돼\s*있(?:는|음|(?=고|거나|으며|으면))|된|되어|한)|정해\s*둔|되어\s*있는|돼\s*있는|채워\s*(?:둔|놓은)|채워진|채운|존재하는|넣어\s*둔|들어\s*있(?:는|음|(?=고|거나|으며|으면))|된(?=\s|$)|있는|있음|있(?=고|거나|으며|으면))/u],
 ];
 const doubleNegation = /아닌|아니라|없지|않지|(?:없|비어|미설정|미입력)[가-힣\s]{0,16}(?:않|아니)|않[가-힣\s]{0,12}(?:않|아니)/u;
@@ -198,11 +199,23 @@ const semanticCarriers: Record<NonNullable<QueryPlan["semantic"]>, RegExp[]> = {
   ],
 };
 
+// These phrases belong to a proved workflow, never to an ordinary list's filters.
+const workflowCarriers: Partial<Record<QueryPlan["operation"], RegExp[]>> = {
+  compare: [
+    new RegExp(`^(?:서로\\s*)?다른\\s*(?:점|부분|설정값)(?:들)?(?:을|를)?${boundary}`, "u"),
+    new RegExp(`^(?:비교|대조)(?:해서|하여)\\s*(?:보여|알려|확인)${requestEnding}${boundary}`, "u"),
+  ],
+  audit: [new RegExp(`^QA(?:로|으로|를)?${boundary}`, "iu")],
+  policy: [new RegExp(`^적용\\s*내용(?:을|은|이)?${boundary}`, "u")],
+  history: [new RegExp(`^일어난${boundary}`, "u")],
+  create_rule: [new RegExp(`^검사할${boundary}`, "u")],
+};
+
 // 알 수 없는 단어는 내부 글자를 지우지 않고 남은 입력 전체를 보존한다.
-export function carrierResidual(text: string, semantic?: QueryPlan["semantic"]) {
+export function carrierResidual(text: string, semantic?: QueryPlan["semantic"], operation?: QueryPlan["operation"]) {
   let cursor = 0;
   while (cursor < text.length) {
-    const lengths = [...carrierParts, ...(semantic ? semanticCarriers[semantic] : [])].map(pattern => pattern.exec(text.slice(cursor))?.[0].length ?? 0);
+    const lengths = [...carrierParts, ...(semantic ? semanticCarriers[semantic] : []), ...(operation ? workflowCarriers[operation] ?? [] : [])].map(pattern => pattern.exec(text.slice(cursor))?.[0].length ?? 0);
     const consumed = Math.max(...lengths);
     if (!consumed) return text.slice(cursor).trim();
     cursor += consumed;
@@ -211,14 +224,14 @@ export function carrierResidual(text: string, semantic?: QueryPlan["semantic"]) 
 }
 
 export function queryPlanRemainder(text: string, operation?: QueryPlan["operation"], semantic?: QueryPlan["semantic"]) {
-  if (!["audit", "policy", "history"].includes(operation ?? "")) return carrierResidual(text, semantic);
+  if (!["audit", "policy", "history"].includes(operation ?? "")) return carrierResidual(text, semantic, operation);
   const clean = queryScopeText(text), characters = text.split("");
   // In an unfiltered workflow a field immediately qualifying its topic is not a predicate.
   for (const [, pattern] of anchors) for (const match of clean.matchAll(pattern)) {
     if (/^\s*(?:설정(?:값)?\s*)?(?:정책|가이드|이력|검수|점검|검사)(?=$|\s|을|를|이|가|의)/u.test(clean.slice(match.index + match[0].length)))
       characters.fill(" ", match.index, match.index + match[0].length);
   }
-  return carrierResidual(characters.join(""), semantic);
+  return carrierResidual(characters.join(""), semantic, operation);
 }
 
 /** Scope-stripped list/count requests use exactly the same closed carrier grammar. */
@@ -260,7 +273,9 @@ function hasUnrepresentedCondition(residual: string, unboundMarkers: string[], p
 export function analyzeQueryEvidence(text: string, literals: Literals, options: EvidenceOptions = {}) {
   const clean = queryScopeText(text), filters: GroundedQueryFilter[] = [...(options.literalFacts ?? [])], unresolved: string[] = [], ambiguities: string[] = [];
   if (epistemicPredicate.test(clean)) ambiguities.push("ambiguous_scope");
-  const all = anchors.flatMap(([field_id, pattern]) => [...(field_id === "name" ? mask(text) : clean).matchAll(pattern)].map(found => ({ field_id, start: found.index, end: found.index + found[0].length, marker: found[0] })));
+  // A complete product owns its words before an adjacent field marker can claim them.
+  const nameText = stripAdProductMentions(mask(text));
+  const all = anchors.flatMap(([field_id, pattern]) => [...(field_id === "name" ? nameText : clean).matchAll(pattern)].map(found => ({ field_id, start: found.index, end: found.index + found[0].length, marker: found[0] })));
   const displayed = all.flatMap(item => {
     const display = /^(?:을|를|도)?\s*(?:(?:함께|같이)\s*)?(?:보여|표시|알려|출력)/u.exec(clean.slice(item.end));
     return display ? [[item.start, item.end + display[0].length] as [number, number]] : [];
@@ -489,7 +504,7 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
     for (const { span: [start, end] } of logic_evidence) quantified = quantified.slice(0, start) + " ".repeat(end - start) + quantified.slice(end);
     const owned = filters.length > 1 && logic_evidence.every(item => item.span[0] >= proofUnits.at(-1)!.span[1]) &&
       fields.every(anchor => filters.some(fact => fact.field_id === anchor.field_id && fact.span[0] <= anchor.start && fact.span[1] >= anchor.end)) &&
-      !carrierResidual(quantified, options.semantic);
+      !carrierResidual(quantified, options.semantic, options.operation);
     if (owned) residual = quantified;
     else ambiguities.push("mixed_logic");
   }
@@ -499,7 +514,7 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
   if (filters.length > 1 && hasOr && hasAnd) ambiguities.push("mixed_logic");
   if (filters.length > 1 && /[()（）]/u.test(mask(residual))) ambiguities.push("nested_logic");
   const logical_operator = ambiguities.some(item => item === "mixed_logic" || item === "nested_logic") ? undefined : hasOr ? "OR" as const : "AND" as const;
-  const remaining = carrierResidual(residual, options.semantic);
+  const remaining = carrierResidual(residual, options.semantic, options.operation);
   if (remaining) {
     unresolved.push(`residual:${remaining}`);
     const unboundMarkers = fields.filter(anchor => !filters.some(fact => fact.field_id === anchor.field_id && fact.span[0] <= anchor.start && fact.span[1] >= anchor.end))

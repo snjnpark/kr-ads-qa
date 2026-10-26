@@ -135,15 +135,17 @@ function queryEvidence(text: string, numeric: ReturnType<typeof queryLiterals>, 
       literalFacts.push({ field_id: "created", filter: { field: "created_at", operator: "between", value: range }, span, text: text.slice(...span) });
     }
   }
+  const request = analyzeQueryAnswerability(text);
   return analyzeQueryEvidence(text, numeric, {
     literalsFor: clause => queryLiterals(clause, now, timezone), requestRemainder: queryRequestRemainder, literalFacts,
-    semantic: analyzeQueryAnswerability(text).semantic,
+    semantic: request.semantic, operation: request.operation,
   });
 }
 function evidenceClarification(evidence: ReturnType<typeof queryEvidence>): string | undefined {
   if (evidence.ambiguities.includes("unrepresented_condition")) return "해석하지 못한 추가 조건이 있습니다. 적용할 조건을 나누어 구체적으로 알려주세요.";
   if (evidence.ambiguities.includes("ambiguous_scope")) return "부정 표현의 범위가 분명하지 않습니다. 값이 있는지 없는지를 구체적으로 알려주세요.";
   if (evidence.ambiguities.includes("ambiguous_field_attachment")) return "각 항목에 적용할 조건을 구분해 주세요. 일예산과 총예산 중 어느 조건인지 알려주세요.";
+  if (evidence.ambiguities.some(item => item.endsWith(":ambiguous_predicate"))) return "부정 표현의 범위가 분명하지 않습니다. 각 항목의 조건을 긍정 표현으로 구체적으로 알려주세요.";
   if (evidence.ambiguities.some(item => /multiple_predicates|multiple_operands|mixed_logic|nested_logic/u.test(item)))
     return "같은 항목의 여러 조건이나 중첩된 연결은 나누어 질문해 주세요.";
 }
@@ -233,7 +235,7 @@ export function preprocessQuery(text: string, context: QueryContext | undefined,
   if ((/예산/u.test(unquoted) && !numeric.amounts.length && /큰|높은|낮|적은|적게|과다|조금|저렴|지나친|적정|넉넉|많이|평균적인|기준보다|기준\s*금액|얼마\s*미만/u.test(unquoted)) ||
       (/이름|명칭/u.test(unquotedAdText(text)) && /아직|나중에|다음에|미정|비워|모르겠|무엇이|(?:그|이)\s*(?:단어|문구)|해당\s*문구|지정할\s*문구/u.test(unquotedAdText(text)) && !numeric.quotedStrings.length) ||
       /(?:이름|명칭).*(?:특정\s*(?:단어|문구)|검색어|어떤\s*(?:단어|문구))/u.test(unquotedAdText(text)) && !numeric.quotedStrings.length ||
-      /일예산인지.*(?:전체|총)\s*예산인지|금액\s*단위는\s*빠졌/u.test(unquoted))
+      /일예산인지.*(?:전체|총)\s*예산인지|예산\s*종류(?:가|는)?\s*다른|금액\s*단위는\s*빠졌/u.test(unquoted))
     throw new Clarification("비교할 값과 항목을 구체적으로 알려주세요.");
   const literalScope = queryLiteralScope(text);
   trace.literal_scope = literalScope;
