@@ -193,7 +193,7 @@ export class BrowserStorage {
     const transaction = this.database.transaction(STORE, "readonly"), done = complete(transaction);
     const [stored] = await Promise.all([requestResult(transaction.objectStore(STORE).get(ACTIVE)), done]);
     const snapshot: unknown = stored ?? empty(); validateStorageSnapshot(snapshot);
-    this.state = structuredClone(snapshot); this.baseline = structuredClone(snapshot);
+    this.state = snapshot; this.baseline = structuredClone(snapshot);
   }
   async commit(options: { signal?: AbortSignal } = {}): Promise<void> {
     this.writable(); if (!this.dirty) return;
