@@ -3,7 +3,8 @@ import { literalProducts, queryIntroduction, stripAdProductMentions, unquotedAdT
 import { PLATFORMS } from "../entities";
 import { Clarification } from "./query";
 import type { QueryPlan } from "./query-model";
-import { queryCarrierOperation } from "./query-evidence";
+import type { Scope } from "../../contracts/domain";
+import { carrierResidual, queryCarrierOperation } from "./query-evidence";
 const entityPatterns: [QueryPlan["entity"], string][] = [
   ["adgroup", "광고\\s*(?:그룹|세트|셋)명?|(?<![가-힣])(?:그룹명|세트명)|\\bad\\s*(?:groups?|sets?)\\b"],
   ["asset_group", "(?:애셋|에셋)\\s*그룹명?|\\basset\\s*groups?\\b"],
@@ -31,6 +32,21 @@ export function assertEntityCapabilities(entity: string, platforms: readonly str
   if ((entity === "keyword" && products.some(product => ["naver:SHOPPING", "naver:PLACE"].includes(product))) ||
       (products.includes("google:PERFORMANCE_MAX") && !["campaign", "asset_group"].includes(entity)))
     throw new Clarification("선택한 광고상품에서는 해당 항목을 조회할 수 없습니다. 캠페인 또는 지원하는 하위 항목을 지정해 주세요.");
+}
+
+/** A selected scope constrains a request; it must never silently drop an explicit part. */
+export function resolveQueryScope(request: { entity?: string; platforms: readonly string[]; products?: readonly string[] }, selected: Scope): Scope {
+  if (selected.platforms?.length && request.platforms.some(platform => !selected.platforms!.includes(platform)))
+    throw new Clarification("질문의 플랫폼과 선택한 플랫폼이 다릅니다. 요청한 모든 플랫폼을 선택해 주세요.");
+  if (selected.products?.length && request.products?.some(product => !selected.products!.includes(product)))
+    throw new Clarification("질문의 광고상품과 선택한 광고상품이 다릅니다. 요청한 모든 광고상품을 선택해 주세요.");
+  const platforms = request.platforms.length ? [...request.platforms] : selected.platforms;
+  const selectedProducts = selected.products?.filter(product => !platforms?.length || platforms.includes(product.split(":")[0]));
+  if (selected.products?.length && !selectedProducts?.length)
+    throw new Clarification("질문의 플랫폼과 선택한 광고상품이 다릅니다. 같은 매체의 광고상품을 선택해 주세요.");
+  const products = request.products?.length ? [...request.products] : selectedProducts;
+  if (request.entity) assertEntityCapabilities(request.entity, platforms ?? [], products ?? []);
+  return { ...selected, ...(platforms ? { platforms } : {}), ...(products ? { products } : {}) };
 }
 type ScopeSpan = { start: number; end: number; negative: boolean; exclusion_end: number; name_field?: boolean };
 function scopeSpans(mentions: ScopeSpan[], text: string): [number, number][] {
@@ -60,6 +76,13 @@ const freshSearchReference = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${priorTime}|기
 
 function literalScopeEvidence(text: string) {
   const clean = queryScopeText(text);
+  const conditionMarker = /일\s*예산|하루\s*예산|총\s*예산|전체\s*예산|예산|종료\s*(?:일|날짜)|상태|이름|명칭|생성(?:일|\s*날짜)?|만든|\bID\b|아이디/iu;
+  const displayOnly = /^(?:도|을|를)?\s*(?:(?:함께|같이)\s*)?(?:보여|표시|알려|출력)/u;
+  const accountFields = clean.matchAll(new RegExp(`(?<![\\p{L}\\p{N}_])(?:광고\\s*)?계정(?:의)?\\s*(?:${conditionMarker.source})`, "giu"));
+  for (const field of accountFields) {
+    if (!displayOnly.test(clean.slice(field.index + field[0].length).trimStart()))
+      throw new Clarification("계정 필드의 조건을 광고 항목의 조건으로 바꿀 수 없습니다. 조회할 계정은 화면에서 선택해 주세요.");
+  }
   if (/제외하지|빼지|아니지/u.test(clean)) throw new Clarification("제외하지 않을 범위를 긍정 표현으로 다시 지정해 주세요.");
   const mentions = adVendorSpans(text);
   const positive = new Set(mentions.filter(m => !m.negative).map(m => m.platform));
@@ -92,11 +115,19 @@ function literalScopeEvidence(text: string) {
     const between = objectText.slice(matches[0].end, matches.at(-1)!.start);
     const bridges = matches.slice(1).map((mention, index) => ({ start: matches[index].end, end: mention.start,
       text: objectText.slice(matches[index].end, mention.start) }));
+    const hierarchy = /^\s*(?:(?:의|에|에서)\s*)?(?:(?:하위|아래|밑)(?:의|에|에서)?|속한)\s*/u;
+    if (matches.slice(0, -1).some(mention => mention.name_field) || bridges.some(bridge => {
+      const condition = conditionMarker.exec(bridge.text);
+      return condition && !hierarchy.test(bridge.text.slice(0, condition.index));
+    }))
+      throw new Clarification("상위 항목의 조건을 하위 항목의 조건으로 바꿀 수 없습니다. 상위 항목을 먼저 검색한 뒤 하위 항목을 조회해 주세요.");
     if (!descending || /(?:와|과|및|하고|이나|또는|혹은|상위|부모|,)/u.test(between) ||
         bridges.some(bridge => /속한/u.test(bridge.text) && !/^\s*(?:에|에서)\s*속한\s*$/u.test(bridge.text)))
       throw new Clarification("조회할 대상 종류를 하나만 지정해 주세요.");
-    for (const bridge of bridges) if (/^\s*(?:(?:의|에|에서)\s*)?(?:(?:하위|아래|밑)(?:의|에|에서)?|속한)\s*$/u.test(bridge.text))
-      relationSpans.push([bridge.start, bridge.end]);
+    for (const bridge of bridges) {
+      const relation = hierarchy.exec(bridge.text);
+      if (relation) relationSpans.push([bridge.start, bridge.start + relation[0].length]);
+    }
   }
   const entity = entities.at(-1);
   const freshSearchSpans: [number, number][] = [];
@@ -107,7 +138,6 @@ function literalScopeEvidence(text: string) {
   const referenceMentions = [...clean.matchAll(referencePattern)]
     .filter(match => !freshSearchSpans.some(([start, end]) => start <= match.index && end >= match.index + match[0].length));
   const temporalReference = referenceMentions.some(match => new RegExp(`^${priorTime}`, "u").test(match[0]));
-  const conditionMarker = /일\s*예산|하루\s*예산|총\s*예산|전체\s*예산|예산|종료\s*(?:일|날짜)|상태|이름|명칭|생성(?:일|\s*날짜)?|만든|\bID\b|아이디/iu;
   // A list introduced by this question's own object and condition is a local referent.
   // Earlier references and any proved temporal reference retain the previous-result obligation.
   const references = referenceMentions.filter(match => !(/^(?:해당\s*목록|그\s*항목)$/u.test(match[0]) && !temporalReference &&
@@ -149,6 +179,17 @@ function literalScopeEvidence(text: string) {
   for (const [, end] of productSpans) {
     const carrier = /^\s*(?:상품(?:(?:으로|로)\s*(?:등록된|설정된)|(?:에|에서)\s*(?:등록된|속한|있는)|의)|(?:으로|로)\s*(?:운영하는|등록한|등록된|설정한|설정된)|(?:에|에서)\s*(?:등록한|등록된|속한|있는))(?=$|\s|캠페인|광고|소재|키워드|애셋|에셋)/u.exec(text.slice(end));
     if (carrier) spans.push([end, end + carrier[0].length]);
+  }
+  const prefixRemainder = (end: number) => {
+    const prefix = objectText.slice(0, end).split("");
+    for (const [start, stop] of spans) prefix.fill(" ", start, stop);
+    return carrierResidual(prefix.join(""));
+  };
+  if (entities.length > 1 && matches.slice(0, -1).some(parent => prefixRemainder(parent.start)))
+    throw new Clarification("상위 항목의 조건을 하위 항목의 조건으로 바꿀 수 없습니다. 상위 항목을 먼저 검색한 뒤 하위 항목을 조회해 주세요.");
+  for (const account of objectText.matchAll(/(?<![\p{L}\p{N}_])(?:광고\s*)?계정(?=$|\s|의|에|명)/gu)) {
+    if ((!matches.length || account.index < matches[0].start) && prefixRemainder(account.index))
+      throw new Clarification("계정 필드의 조건을 광고 항목의 조건으로 바꿀 수 없습니다. 조회할 계정은 화면에서 선택해 주세요.");
   }
   return { scope: { ...(entity ? { entity } : {}), platforms, ...(reference ? { reference } : {}) }, spans };
 }

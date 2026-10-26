@@ -6,8 +6,11 @@ import { semanticIdentity } from "./model/identity";
 import type { SemanticInput } from "./model/protocol";
 import { observe } from "../domain/policies/evaluation";
 import { decimal } from "../domain/policies/values";
-import { execute, emptyContext, dateRange, type QueryContext } from "../domain/query/query";
+import { execute, emptyContext, dateRange, Clarification, type QueryContext } from "../domain/query/query";
 import { QueryModelError, type QueryTrace } from "../domain/query/query-model";
+import { queryLiteralScope, resolveQueryScope } from "../domain/query/query-scope";
+import { assertQueryInput } from "../domain/query/query-preparation";
+import { literalProducts } from "../lib/ad-products";
 import { selected, scopeKey } from "../domain/scope";
 
 export type QueryResponse = Json & {
@@ -34,10 +37,21 @@ export async function executeApplicationQuery(
     return { rows: [], status: "REVIEW", message: "설정에서 광고 API를 연결하고 계정 데이터를 불러온 뒤 질문해 주세요." };
   let query;
   let interpretation: QueryTrace;
+  let effectiveScope: Scope;
   try {
+    assertQueryInput(text);
+    const literalScope = queryLiteralScope(text);
+    if (literalScope.reference && !context.has_results)
+      throw new Clarification("먼저 광고를 검색한 뒤 결과를 좁혀 주세요.");
+    if (literalScope.reference && context.scope !== scopeKey(scope))
+      throw new Clarification("조회 범위가 변경되었습니다. 현재 범위에서 먼저 검색해 주세요.");
+    const platforms = literalScope.platforms.length || !literalScope.reference ? literalScope.platforms : context.platforms;
+    resolveQueryScope({ ...literalScope, platforms, products: literalProducts(text, platforms) }, scope);
     const result = await application.ai.parseQuery(text, context, new Date(), application.settings.timezone);
     query = result.query;
     interpretation = result.trace;
+    effectiveScope = resolveQueryScope(query, scope);
+    query.platforms = (effectiveScope.platforms ?? []) as typeof query.platforms;
   } catch (error) {
     return {
       rows: [],
@@ -54,28 +68,6 @@ export async function executeApplicationQuery(
       message:
         "조회 범위가 변경되었습니다. 현재 범위에서 먼저 검색해 주세요.",
     };
-  if (scope.platforms?.length) {
-    const intersect = query.platforms.length
-      ? query.platforms.filter((p) => scope.platforms!.includes(p))
-      : scope.platforms;
-    if (!intersect.length)
-      return {
-        rows: [],
-        status: "REVIEW",
-        message: "질문의 플랫폼과 선택한 플랫폼이 다릅니다.",
-      };
-    query.platforms = intersect as typeof query.platforms;
-  }
-  const effectiveScope = {
-    ...scope,
-    ...(query.platforms.length ? { platforms: query.platforms } : {}),
-    ...(query.products?.length ? { products: query.products } : {}),
-  };
-  if (scope.products?.length && query.products?.length) {
-    const products = query.products.filter(value => scope.products!.includes(value));
-    if (!products.length) return { rows: [], status: "REVIEW", message: "질문의 광고상품과 선택한 광고상품이 다릅니다." };
-    effectiveScope.products = products;
-  }
   if (["audit", "policy", "history", "create_rule"].includes(query.operation)) {
     Object.assign(context, emptyContext(), { scope: scopeKey(scope) });
     if (query.previous)
