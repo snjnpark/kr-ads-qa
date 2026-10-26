@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
 import { literalProducts, unquotedAdText, queryScopeText } from "../../lib/ad-products";
 import { Clarification, dateRange, type QueryContext } from "./query";
-import { queryLiteralScope, queryRequestRemainder, childEntity, descendantType, assertEntityCapabilities } from "./query-scope";
+import { queryLiteralScope, queryRequestRemainder, queryRequestEvidence, childEntity, descendantType, assertEntityCapabilities } from "./query-scope";
 import { analyzeQueryEvidence, queryPlanRemainder, type GroundedQueryFilter } from "./query-evidence";
 import { analyzeQueryAnswerability } from "./query-answerability";
 import type { QueryPlan, QueryTrace } from "./query-model";
@@ -99,13 +99,13 @@ export function budgetCurrency(text: string): QueryPlan["currency"] {
 function idFacts(text: string) {
   return [...queryScopeText(text).matchAll(/(?:원본\s*(?:(?:캠페인|광고\s*(?:그룹|세트)?|(?:애셋|에셋)\s*그룹|소재|키워드)\s*)?)?(?:\bID\b|아이디)/giu)].flatMap(match => {
     const tail = text.slice(match.index + match[0].length);
-    const quoted = /^(?:(?:가|는|:)?\s*|를\s*(?:대조하면|확인하면)\s*)(?:'([^']+)'|"([^"]+)"|“([^”]+)”|‘([^’]+)’|`([^`]+)`)/u.exec(tail);
-    const bare = tail.match(/^(?:가|는|:)?\s*([A-Za-z0-9][A-Za-z0-9_-]{0,63})/u);
+    const quoted = /^(?:(?:가|는|[:：])?\s*|를\s*(?:대조하면|확인하면)\s*)(?:'([^']+)'|"([^"]+)"|“([^”]+)”|‘([^’]+)’|`([^`]+)`)/u.exec(tail);
+    const bare = tail.match(/^(?:가|는|[:：])?\s*([A-Za-z0-9][A-Za-z0-9_-]{0,63})/u);
     const operand = quoted ?? bare;
     if (!operand) return [];
     const value = quoted ? quoted.slice(1).find(part => part !== undefined)! : bare![1];
     const rest = tail.slice(operand[0].length);
-    const suffix = /^\s*(?:에\s*해당하는|으로\s*표시된|(?:를|을)\s*가진|(?:와|과)\s*(?:(?:정확히|완전히)\s*)?(?:같은|동일한|일치하는)|하나(?:를|만)|인(?=\s|$)|이고|이며|이야(?=[\s.!?]|$))?/u.exec(rest)![0];
+    const suffix = /^\s*(?:에\s*해당하는|으로\s*표시된|(?:를|을)\s*가진|(?:와|과)\s*(?:(?:정확히|완전히)\s*)?(?:같은|동일한|일치하는)|하나(?:를|만)|(?:으)?로(?=\s|$)(?!\s*(?:시작|끝나|끝난|포함))|인(?=\s|$)|이고|이며|(?:이야|야)(?=[\s.!?]|$))?/u.exec(rest)![0];
     const positive = !!suffix.trim() || /^\s*(?:(?:를|을)\s*)?(?:찾|보여|조회|확인|캠페인|광고|항목|$)/u.test(rest);
     const span: [number, number] = [match.index, match.index + match[0].length + operand[0].length + suffix.length];
     return [{ value, positive, span, text: text.slice(...span) }];
@@ -254,6 +254,8 @@ export function preprocessQuery(text: string, context: QueryContext | undefined,
   if (modelFields.includes("daily") && !/일\s*예\s*산|하루\s*예\s*산|일일(?:에)?\s*예\s*산|총\s*예\s*산|전체\s*예\s*산/u.test(unquoted))
     modelFields.push("lifetime");
   trace.grounded = { ...trace.grounded, model_fields: modelFields };
+  const clauses = queryRequestEvidence(text).clauses;
+  if (clauses.length) trace.grounded.request_clauses = clauses;
   if (!modelFields.length && queryPlanRemainder(typed.residual, request.operation, request.semantic))
     throw new Clarification("해석하지 못한 추가 조건이 있습니다. 적용할 조건을 나누어 구체적으로 알려주세요.");
   return { unquoted, numeric, typed, request, evidence, literalScope, scopeEntity, products, modelFields };

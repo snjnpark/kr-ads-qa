@@ -25,7 +25,7 @@ export const QUERY_EXECUTION_CAPABILITIES = {
 };
 const workflowHeads: [Operation, RegExp][] = [
   ["create_rule", /(?:규칙|룰)(?:안)?(?:을|를)?[^.;?!]{0,45}(?:제안|만들|생성|작성)|(?:제안|만들|생성|작성)[^.;?!]{0,30}(?:규칙|룰)|(?:규칙|룰)\s*(?:초안|안)?(?:을|를)?\s*(?:주세요|주십시오|요청|부탁)/u],
-  ["history", /이력|변경[^.;?!]*(?:내역|기록)|설정이?\s*바뀐\s*기록/u],
+  ["history", /이력|변경[^.;?!]*(?:내역|기록)|설정이?\s*바뀐\s*(?:내역|기록)/u],
   ["policy", /정책|가이드/u],
   ["audit", /검수|점검(?!표)|\bQA\b/iu],
   ["compare", /비교|설정[^.;?!]*(?:차이|대조)/u],
@@ -41,18 +41,14 @@ export function analyzeQueryAnswerability(text: string, evidence?: Evidence, con
   try { reference = queryLiteralScope(text).reference; } catch { /* The caller reports incompatible scope using the same grammar. */ }
   if (reference && !context?.has_results) add("context_required", "먼저 광고를 검색한 뒤 결과를 좁혀 주세요.", "clarification");
   const workflowText = clean.replace(/비교(?=하면|할\s*때|\s*기준)|(?:검수|점검)(?=에서|용|\s*기준)/gu, "  ")
-    .replace(/[^.;?!]*(?:검수|점검)[^.;?!]*(?:끝났|완료됐|완료했)[^.;?!]*[.;?!]/gu, " ");
+    .replace(/[^.;?!]*(?:검수|점검)[^.;?!]*(?:끝났|완료됐|완료했)[^.;?!]*[.;?!]/gu, " ")
+    // Consume the operation word only inside its own grammatical role; independent verbs remain visible.
+    .replace(/(?:검수|점검)(?=\s*정책)/gu, "  ")
+    .replace(/(?:검수|점검|QA)(?=(?:하는|할|하도록|용)?\s*(?:새(?:로운)?\s*)?(?:규칙|룰))/giu, "  ")
+    .replace(/정책(?:을|를|에)?\s*(?:기준으로|따라|적용해)/gu, match => match.replace("정책", "  "))
+    .replace(/정책(?:의)?\s*(?:(?:적용|배정|연결)\s*(?:상태|내용|여부|내역)(?:을|를|은|는)?|(?:을|를))\s*(?:검수|점검)/gu,
+      match => match.replace(/검수|점검/gu, "  "));
   const operations = workflowHeads.filter(([, pattern]) => pattern.test(workflowText)).map(([operation]) => operation);
-  if (operations.includes("create_rule")) {
-    // Checking settings describes a rule's predicate; it does not request an additional audit run.
-    if (/(?:검수|점검|QA)(?:하는|할|하도록|용|\s*규칙)/iu.test(clean)) {
-      const audit = operations.indexOf("audit"); if (audit >= 0) operations.splice(audit, 1);
-    }
-  }
-  if (operations.includes("audit") && operations.includes("policy")) {
-    if (/정책(?:을|를|에)?\s*(?:기준으로|따라|적용해)/u.test(clean)) operations.splice(operations.indexOf("policy"), 1);
-    else if (/(?:검수|점검)\s*정책/u.test(clean)) operations.splice(operations.indexOf("audit"), 1);
-  }
   if (countRequest.test(clean)) operations.push("count");
   const coordinatedList = /(?:보여|알려|찾아|조회해)(?:\s*주)?(?:고|준\s*(?:뒤|후)|준\s*다음)[^.;?!]*(?:검수|점검|이력|정책|비교)/u;
   const followingList = /(?:비교|검수|점검|이력|정책)[^.;?!]*(?:한\s*(?:후|뒤|다음)|하고|해\s*주고)[^.;?!]*(?:(?:목록|리스트)(?:도|을|를)?\s*(?:보여|알려|조회)|찾아)/u;

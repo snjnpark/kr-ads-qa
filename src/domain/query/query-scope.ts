@@ -5,6 +5,7 @@ import { Clarification } from "./query";
 import type { QueryPlan } from "./query-model";
 import type { Scope } from "../../contracts/domain";
 import { carrierResidual, queryCarrierOperation } from "./query-evidence";
+import { consumeQueryDeclarations } from "./query-clauses";
 const entityPatterns: [QueryPlan["entity"], string][] = [
   ["adgroup", "광고\\s*(?:그룹|세트|셋)명?|(?<![가-힣])(?:그룹명|세트명)|\\bad\\s*(?:groups?|sets?)\\b"],
   ["asset_group", "(?:애셋|에셋)\\s*그룹명?|\\basset\\s*groups?\\b"],
@@ -62,7 +63,7 @@ const vendorCarrier = new RegExp(`^\\s*(?:쪽(?:의|에서|은|는)?|기준(?:�
 const complementCarrier = new RegExp(`^\\s*나머지\\s*(?:매체|플랫폼)(?:의|에서|를|만)?${scopeBoundary}`, "u");
 const platformCountCarrier = new RegExp(`^\\s*(\\d+|두|둘|세|셋|네|넷|다섯)\\s*(?:개\\s*)?(?:매체|플랫폼)(?:의|에서|를|만)?${scopeBoundary}`, "u");
 const referenceObject = "(?:캠페인|광고\\s*(?:그룹|세트)|(?:애셋|에셋)\\s*그룹|소재|키워드|광고)(?:들)?";
-const resultNoun = "(?:(?:(?:검색|조회)\\s*)?(?:결과|목록|리스트)|것들?|항목들?)";
+const resultNoun = "(?:(?:빈\\s*)?(?:(?:검색|조회)\\s*)?(?:결과|목록|리스트)|것들?|항목들?)";
 const referenceTail = "(?=$|[\\s,.;?!]|의|중|에(?:서|는)?(?=\\s|$|하위|아래|밑|캠페인|광고|소재|키워드|애셋|에셋)|은|는|을|를|만|도|하위|아래|밑|캠페인|광고|소재|키워드|애셋|에셋)";
 const priorTime = "(?:방금|아까|앞서|앞선|(?:이전|직전)(?:에|의)?)";
 const retrieval = "(?:찾(?:은|았던)|검색(?:한|했던)|조회(?:한|했던)|나온|확인(?:한|했던)|추린|보여\\s*준)";
@@ -115,14 +116,15 @@ function literalScopeEvidence(text: string) {
     const between = objectText.slice(matches[0].end, matches.at(-1)!.start);
     const bridges = matches.slice(1).map((mention, index) => ({ start: matches[index].end, end: mention.start,
       text: objectText.slice(matches[index].end, mention.start) }));
-    const hierarchy = /^\s*(?:(?:의|에|에서)\s*)?(?:(?:하위|아래|밑)(?:의|에|에서)?|속한)\s*/u;
+    const hierarchy = /^\s*(?:들\s*)?(?:(?:의|에|에서)\s*)?(?:(?:하위|아래|밑)(?:의|에서|에)?(?:\s*(?:속한|있는|연결된|등록된))?|속한)\s*/u;
     if (matches.slice(0, -1).some(mention => mention.name_field) || bridges.some(bridge => {
       const condition = conditionMarker.exec(bridge.text);
       return condition && !hierarchy.test(bridge.text.slice(0, condition.index));
     }))
       throw new Clarification("상위 항목의 조건을 하위 항목의 조건으로 바꿀 수 없습니다. 상위 항목을 먼저 검색한 뒤 하위 항목을 조회해 주세요.");
     if (!descending || /(?:와|과|및|하고|이나|또는|혹은|상위|부모|,)/u.test(between) ||
-        bridges.some(bridge => /속한/u.test(bridge.text) && !/^\s*(?:에|에서)\s*속한\s*$/u.test(bridge.text)))
+        bridges.some(bridge => /[.;?!\n]/u.test(bridge.text)) ||
+        bridges.some(bridge => /속한/u.test(bridge.text) && !hierarchy.test(bridge.text)))
       throw new Clarification("조회할 대상 종류를 하나만 지정해 주세요.");
     for (const bridge of bridges) {
       const relation = hierarchy.exec(bridge.text);
@@ -131,6 +133,8 @@ function literalScopeEvidence(text: string) {
   }
   const entity = entities.at(-1);
   const freshSearchSpans: [number, number][] = [];
+  const newSearchDeclarations = [...clean.matchAll(/(?<![\p{L}\p{N}_])(?:새(?:로운)?\s*(?:검색|조회)(?:으로|로))(?=$|[\s,.;?!])/gu)];
+  freshSearchSpans.push(...newSearchDeclarations.map(match => [match.index, match.index + match[0].length] as [number, number]));
   for (const match of clean.matchAll(freshSearchReference)) {
     const reset = freshSearchRole.exec(clean.slice(match.index + match[0].length));
     if (reset) freshSearchSpans.push([match.index, match.index + match[0].length + reset[0].length]);
@@ -143,6 +147,8 @@ function literalScopeEvidence(text: string) {
   const references = referenceMentions.filter(match => !(/^(?:해당\s*목록|그\s*항목)$/u.test(match[0]) && !temporalReference &&
     !excluded.test(clean.slice(match.index + match[0].length)) && !referenceMentions.some(other => other.index < match.index) &&
     matches.some(object => !object.name_field && object.end < match.index && conditionMarker.test(clean.slice(object.end, match.index)))));
+  if (newSearchDeclarations.length && references.length)
+    throw new Clarification("새 검색과 이전 결과 참조를 함께 적용할 수 없습니다. 조회 범위를 하나로 지정해 주세요.");
   if (references.some(match => excluded.test(clean.slice(match.index + match[0].length))))
     throw new Clarification("이전 결과를 이어서 볼지 새로 조회할지 명확히 지정해 주세요.");
   const childSpans = references.flatMap(match => {
@@ -155,6 +161,10 @@ function literalScopeEvidence(text: string) {
   for (const mention of mentions) {
     const carrier = (mention.negative ? complementCarrier : vendorCarrier).exec(text.slice(mention.exclusion_end));
     if (carrier) spans.push([mention.exclusion_end, mention.exclusion_end + carrier[0].length]);
+    if (reference && !mention.negative) {
+      const narrowing = /^\s*(?:으로|로)\s*(?:범위(?:를)?\s*)?좁혀(?:서)?(?=$|[\s,.;?!])/u.exec(clean.slice(mention.end));
+      if (narrowing) spans.push([mention.end, mention.end + narrowing[0].length]);
+    }
   }
   const introduction = queryIntroduction.exec(text);
   if (introduction) spans.push([introduction.index, introduction.index + introduction[0].length]);
@@ -191,7 +201,8 @@ function literalScopeEvidence(text: string) {
     if ((!matches.length || account.index < matches[0].start) && prefixRemainder(account.index))
       throw new Clarification("계정 필드의 조건을 광고 항목의 조건으로 바꿀 수 없습니다. 조회할 계정은 화면에서 선택해 주세요.");
   }
-  return { scope: { ...(entity ? { entity } : {}), platforms, ...(reference ? { reference } : {}) }, spans };
+  return { scope: { ...(entity ? { entity } : {}), platforms, ...(reference ? { reference } : {}) }, spans,
+    targets: matches.filter(mention => !mention.name_field).map(({ start, end }) => ({ start, end })) };
 }
 
 export function queryLiteralScope(text: string) {
@@ -199,11 +210,16 @@ export function queryLiteralScope(text: string) {
 }
 
 /** Remove only scope spans proved by the same interpretation used by queryLiteralScope. */
-export function queryRequestRemainder(text: string): string {
-  const { spans } = literalScopeEvidence(text);
+export function queryRequestEvidence(text: string) {
+  const { spans, targets } = literalScopeEvidence(text);
   const characters = text.split("");
   for (const [start, end] of spans) characters.fill(" ", start, end);
-  return characters.join("");
+  const declarations = consumeQueryDeclarations(text, characters.join(""), targets);
+  return { residual: declarations.text, clauses: declarations.clauses };
+}
+
+export function queryRequestRemainder(text: string): string {
+  return queryRequestEvidence(text).residual;
 }
 
 /** An exact complete list/count command has no unresolved predicate for a model to decide. */

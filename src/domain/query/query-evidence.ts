@@ -21,12 +21,13 @@ const quoted = /"[^"]*"|'[^']*'|“[^”]*”|‘[^’]*’|`[^`]*`/gu;
 const mask = (text: string) => text.replace(quoted, value => " ".repeat(value.length));
 const prefix = /^(?:\s*(?:(?:설정값|항목|금액|값|칸|란)(?:에는|에서|이|가|은|는|을|를|에|의)?|(?:설정|지정|입력|기입)(?:이|가|은|는|을|를)|(?:에는|에서|이|가|은|는|을|를|에|도|아직|아예|:)))*\s*/u;
 const presenceForms: ["is_empty" | "is_not_empty", RegExp][] = [
-  ["is_empty", /^(?:미\s*설정|미입력|미기입|미기재(?:인)?|공란|누락(?:된)?|빈|비어\s*(?:있는|있음)?|비워\s*둔|비었(?:던|음)?|빠져\s*있는|빠진|없는|없음|없(?=거나|고|으면|으며|든)|(?:(?:설정|입력|지정|기입))?(?:되지|하지)\s*않(?:은|는)|(?:설정|입력|지정|기입)\s*안\s*(?:된|한)|(?:입력|설정|기입|기재|지정)해\s*(?:두|놓)지\s*않(?:은|는)|안\s*(?:잡은|잡힌|정한)|잡(?:히)?지\s*않은)/u],
-  ["is_not_empty", /^(?:(?:입력|설정|지정|기입)(?:해\s*(?:둔|놓은)|되어\s*있(?:는|음|(?=고|거나|으며|으면))|돼\s*있(?:는|음|(?=고|거나|으며|으면))|된|되어|한)|정해\s*둔|되어\s*있는|돼\s*있는|채워\s*(?:둔|놓은)|채워진|채운|존재하는|넣어\s*둔|들어\s*있(?:는|음|(?=고|거나|으며|으면))|된(?=\s|$)|있는|있음|있(?=고|거나|으며|으면))/u],
+  ["is_empty", /^(?:미\s*설정|미입력|미기입|미기재(?:인)?|공란|누락(?:된)?|빈|비어\s*(?:있는|있음)?|비워\s*둔|비었(?:던|음)?|빠져\s*있는|빠진|없는|없음|없(?=거나|고|으면|으며|든)|(?:(?:설정|입력|지정|기입|정))?(?:되지|하지)\s*않(?:은|는)|(?:설정|입력|지정|기입)\s*안\s*(?:된|한)|(?:입력|설정|기입|기재|지정)해\s*(?:두|놓)지\s*않(?:은|는)|안\s*(?:잡은|잡힌|정한)|잡(?:히)?지\s*않은)/u],
+  ["is_not_empty", /^(?:(?:입력|설정|지정|기입)(?:해\s*(?:둔|놓은)|되어\s*있(?:는|음|(?=고|거나|으며|으면))|돼\s*있(?:는|음|(?=고|거나|으며|으면))|된|되어|한)|정해\s*둔|적혀\s*있(?:는|음|(?=고|거나|으며|으면))|되어\s*있는|돼\s*있는|채워\s*(?:둔|놓은)|채워진|채운|존재하는|넣어\s*둔|들어\s*있(?:는|음|(?=고|거나|으며|으면))|된(?=\s|$)|있는|있음|있(?=고|거나|으며|으면))/u],
 ];
 const doubleNegation = /아닌|아니라|없지|않지|(?:없|비어|미설정|미입력)[가-힣\s]{0,16}(?:않|아니)|않[가-힣\s]{0,12}(?:않|아니)/u;
-function presenceMatch(clause: string) {
-  const start = prefix.exec(clause)![0].length;
+function presenceMatch(clause: string, field?: FieldId) {
+  const initial = prefix.exec(clause)![0].length;
+  const start = initial + (field === "end" ? /^날짜(?:에는|이|가|은|는|을|를|에)?\s*/u.exec(clause.slice(initial))?.[0].length ?? 0 : 0);
   const withState = (length: number) => length + (/^\s*상태인/u.exec(clause.slice(length))?.[0].length ?? 0);
   const explicitNotEmpty = /^(?:없지(?:는)?|비어\s*있지(?:는)?)\s*않(?:은|는)/u.exec(clause.slice(start));
   if (explicitNotEmpty) return { operator: "is_not_empty" as const, length: withState(start + explicitNotEmpty[0].length) };
@@ -49,7 +50,7 @@ const comparisons: [QueryPlan["filters"][number]["operator"], RegExp][] = [
   ["ne", /^(?:(?:이|가|은|는|도)\s*)?(?:아닌|아니면)/u],
   ["ne", /^(?:으로|로)\s*(?:잡|두|맞추|설정하|지정하|정하)지\s*않(?:은|는)/u],
   ["ne", /^(?:(?:보다|와|과)\s*)?(?:같지\s*않(?:은|는|으(?=면서)|으면)|다르게\s*(?:잡은|설정한|지정한)|다른(?:\s*금액인)?|동일하지\s*않(?:은|는|으(?=면서)|으면))/u],
-  ["gte", /^(?:보다\s*)?(?:(?:작|적|낮)지\s*않(?:은|는|으(?=면서)|으면)|미만이\s*(?:아닌|아니면)|(?:크|많|높)거나\s*같(?:은|으면))/u],
+  ["gte", /^(?:보다\s*|(?:을|를)\s*(?=밑돌))?(?:(?:작|적|낮|밑돌)지\s*않(?:은|는|으(?=면서)|으면)|미만이\s*(?:아닌|아니면)|(?:크|많|높)거나\s*같(?:은|으면))/u],
   ["lte", /^(?:(?:보다|을|를)\s*)?(?:(?:크|많|높)지\s*않(?:은|는|으(?=면서)|으면)|넘지\s*않(?:은|는|으(?=면서)|으면)|초과가?\s*(?:아닌|아니면)|(?:작|적|낮)거나\s*같(?:은|으면))/u],
   ["gt", /^이하가?\s*(?:아닌|아니면)/u], ["lt", /^이상이\s*(?:아닌|아니면)/u],
   ["gte", /^(?:이상|부터)(?:인|이(?=면서)|이면)?/u], ["lte", /^(?:이하|까지)(?:인|이(?=면서)|이면)?/u],
@@ -77,7 +78,7 @@ const anchors: [FieldId, RegExp][] = [
   ["name", /(?:표시\s*)?(?:(?:캠페인|광고\s*(?:그룹|세트)?|(?:애셋|에셋)\s*그룹|키워드|소재)\s*(?:이름|명칭|명)|이름|명칭|그룹명|세트명)(?=$|[\s:：=]|에서|에는|에|이|가|은|는|을|를|과|와|의)/gu],
   ["created", /생성(?:일|\s*날짜)?|만든|만들어진/gu], ["id", /\bID\b|아이디/giu],
 ];
-const statusPattern = /(?:(?:운영\s*)?상태(?:가|는|:)?\s*)?(?:비\s*활\s*성(?:화)?(?:된|인)?|중지(?:된|됐|되어|돼|인)?|정지(?:된|인)?|집행(?:을)?\s*중단한|중단(?:된|인)?|멈[춘춰]|꺼져\s*있는|꺼진|꺼\s*(?:놓은|둔)|운영(?:을)?\s*(?:멈춘|중단한|하지\s*않는|안\s*하는|중(?:인)?)|활\s*성(?:화)?(?:된|인)?|켜져\s*있는|켜진|켜\s*(?:놓은|둔)|(?:사용|진행|집행)\s*중(?:인)?|\b(?:inactive|paused|disabled|active|enabled|running)\b)(?:\s*상태(?:인|면|며)?)?/giu;
+const statusPattern = /(?:(?:운영\s*)?상태(?:가|는|:)?\s*)?(?:비\s*활\s*성(?:화)?(?:된|인|(?:되어|돼)\s*있는)?|중지(?:된|됐|되어|돼|인)?|정지(?:된|인)?|집행(?:을)?\s*중단한|중단(?:된|인)?|멈[춘춰]|꺼져\s*있는|꺼진|꺼\s*(?:놓은|둔)|운영(?:을)?\s*(?:멈춘|중단한|하지\s*않는|안\s*하는|중(?:인)?)|활\s*성(?:화)?(?:된|인|(?:되어|돼)\s*있는)?|켜져\s*있는|켜진|켜\s*(?:놓은|둔)|(?:사용|진행|집행)\s*중(?:인)?|\b(?:inactive|paused|disabled|active|enabled|running)\b)(?:\s*상태(?:인|면|며)?)?/giu;
 const inactiveStatus = (value: string) => /비활성|중지|정지|중단|멈[춘춰]|꺼|하지않|안하는|inactive|paused|disabled/iu.test(value.replace(/\s+/gu, ""));
 
 function nameMatch(clause: string, allowBare = false) {
@@ -122,10 +123,10 @@ function nameMatch(clause: string, allowBare = false) {
 
 const boundary = "(?=$|[\\s,.;?!·])";
 const polite = "(?:주시겠습니까|주면\\s*(?:됩니다|돼)|주세요|주실래요?|주셔요|주어요|주시겠어요|주겠어|줄래요?|줘요?|볼래요?|할게요?|할래요?|합니다|하겠습니다|주십시오|바랍니다|줄\\s*수\\s*있(?:어요|어)|주실\\s*수\\s*있(?:나요|을까요)|주(?:시)?면\\s*좋겠(?:습니다|어요|어))";
-const requestEnding = `(?:\\s*(?:(?:하고|고)\\s*싶(?:습니다|어요|어)|해\\s*(?:${polite})?|${polite}))?`;
+const requestEnding = `(?:\\s*(?:(?:하고|고)\\s*싶(?:습니다|어요|어)|할\\s*수\\s*있(?:을까(?:요)?|나요|겠(?:어요|습니까))|해\\s*(?:${polite})?|${polite}))?`;
 const logicPhrases: ["AND" | "OR", RegExp][] = [
-  ["OR", new RegExp(`^(?:(?:어느\\s*)?한쪽\\s*조건만\\s*(?:충족|만족)해도\\s*(?:됩니다|돼요|돼)|조건\\s*중\\s*하나를\\s*만족하는|한쪽에\\s*해당하는)${boundary}`, "u")],
-  ["AND", new RegExp(`^(?:모두|전부)\\s*만족하는${boundary}`, "u")],
+  ["OR", new RegExp(`^(?:(?:어느\\s*)?한쪽\\s*조건만\\s*(?:충족|만족)해도\\s*(?:됩니다|돼요|돼)|조건\\s*중\\s*(?:하나를\\s*만족하는|하나라도\\s*(?:맞는|만족하는|충족하는))|한쪽에\\s*해당하는)${boundary}`, "u")],
+  ["AND", new RegExp(`^(?:두\\s*조건(?:을)?\\s*)?(?:모두|전부)\\s*(?:만족|충족)하는${boundary}`, "u")],
 ];
 const carrierParts = [
   new RegExp(`^(?:이번\\s*확인\\s*대상은|검토\\s*대상은|점검\\s*메모\\s*:)${boundary}`, "u"),
@@ -204,11 +205,18 @@ const workflowCarriers: Partial<Record<QueryPlan["operation"], RegExp[]>> = {
   compare: [
     new RegExp(`^(?:서로\\s*)?다른\\s*(?:점|부분|설정값)(?:들)?(?:을|를)?${boundary}`, "u"),
     new RegExp(`^(?:비교|대조)(?:해서|하여)\\s*(?:보여|알려|확인)${requestEnding}${boundary}`, "u"),
+    new RegExp(`^(?:(?:간|사이)\\s*)?설정(?:값)?(?:의)?\\s*차이점(?:들)?(?:을|은|이)?${boundary}`, "u"),
   ],
   audit: [new RegExp(`^QA(?:로|으로|를)?${boundary}`, "iu")],
-  policy: [new RegExp(`^적용\\s*내용(?:을|은|이)?${boundary}`, "u")],
-  history: [new RegExp(`^일어난${boundary}`, "u")],
-  create_rule: [new RegExp(`^검사할${boundary}`, "u")],
+  policy: [
+    new RegExp(`^(?:정책\\s*)?적용\\s*(?:내용|상태|여부)(?:을|를|은|는|이|가)?${boundary}`, "u"),
+    new RegExp(`^(?:검토|검수|점검)${requestEnding}${boundary}`, "u"),
+  ],
+  history: [new RegExp(`^일어난${boundary}`, "u"), new RegExp(`^설정(?:이)?\\s*(?:바뀐|변경된|수정된)\\s*(?:내역|기록|이력)(?:을|은|이)?${boundary}`, "u")],
+  create_rule: [
+    new RegExp(`^(?:여부(?:를)?\\s*)?검사할${boundary}`, "u"),
+    new RegExp(`^(?:규칙|룰)(?:을|를)?\\s*만들어${requestEnding}${boundary}`, "u"),
+  ],
 };
 
 // 알 수 없는 단어는 내부 글자를 지우지 않고 남은 입력 전체를 보존한다.
@@ -271,7 +279,10 @@ function hasUnrepresentedCondition(residual: string, unboundMarkers: string[], p
 }
 
 export function analyzeQueryEvidence(text: string, literals: Literals, options: EvidenceOptions = {}) {
-  const clean = queryScopeText(text), filters: GroundedQueryFilter[] = [...(options.literalFacts ?? [])], unresolved: string[] = [], ambiguities: string[] = [];
+  const scoped = queryScopeText(text);
+  // A proved policy's application status is its topic; a separate entity status remains a field.
+  const clean = options.operation === "policy" ? scoped.replace(/정책\s*적용\s*(?:상태|내용|여부)(?:을|를|은|는|이|가)?(?=$|[\s,.;?!·])/gu, value => " ".repeat(value.length)) : scoped;
+  const filters: GroundedQueryFilter[] = [...(options.literalFacts ?? [])], unresolved: string[] = [], ambiguities: string[] = [];
   if (epistemicPredicate.test(clean)) ambiguities.push("ambiguous_scope");
   // A complete product owns its words before an adjacent field marker can claim them.
   const nameText = stripAdProductMentions(mask(text));
@@ -305,7 +316,7 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
   let statusEvidence = clean;
   for (const [index, anchor] of fields.entries()) {
     if (!["daily", "lifetime", "end"].includes(anchor.field_id)) continue;
-    const presence = presenceMatch(clean.slice(anchor.end, fields[index + 1]?.start ?? clean.length));
+    const presence = presenceMatch(clean.slice(anchor.end, fields[index + 1]?.start ?? clean.length), anchor.field_id);
     if (presence) {
       const end = anchor.end + presence.length;
       statusEvidence = statusEvidence.slice(0, anchor.start) + " ".repeat(end - anchor.start) + statusEvidence.slice(end);
@@ -333,7 +344,7 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
     if (doubleNegation.test(clause)) continue;
     const initial = prefix.exec(clause)![0].length;
     const quantifier = /^(?:(?:모두|둘\s*다|전부)\s*)?/u.exec(clause.slice(initial))![0].length;
-    const presence = presenceMatch(clause.slice(initial + quantifier));
+    const presence = presenceMatch(clause.slice(initial + quantifier), fields[end].field_id);
     if (!presence) continue;
     const length = initial + quantifier + presence.length;
     if (/말고|나머지|아닌|아니|제외|않|(?:^|\s)안(?:\s|$)/u.test(clause.slice(length))) continue;
@@ -410,7 +421,7 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
         unresolved.push(`${anchor.field_id}:unresolved`);
         continue;
       }
-      const presence = presenceMatch(mask(clause));
+      const presence = presenceMatch(mask(clause), anchor.field_id);
       if (presence) { filter = { field, operator: presence.operator }; length = presence.length; }
       else if (anchor.field_id !== "end") {
         const initial = prefix.exec(clause)![0].length;
@@ -503,7 +514,7 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
   if (logic_evidence.length) {
     let quantified = residual;
     for (const { span: [start, end] } of logic_evidence) quantified = quantified.slice(0, start) + " ".repeat(end - start) + quantified.slice(end);
-    const owned = filters.length > 1 && logic_evidence.every(item => item.span[0] >= proofUnits.at(-1)!.span[1]) &&
+    const owned = filters.length > 1 && logic_evidence.every(item => item.span[0] >= proofUnits.at(-1)!.span[1] && (!/^두\s*조건/u.test(item.text) || filters.length === 2)) &&
       fields.every(anchor => filters.some(fact => fact.field_id === anchor.field_id && fact.span[0] <= anchor.start && fact.span[1] >= anchor.end)) &&
       !carrierResidual(quantified, options.semantic, options.operation);
     if (owned) residual = quantified;
