@@ -358,7 +358,8 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
       const wasInactive = inactiveStatus(anchor.marker);
       const negation = /^\s*(?:하지\s*않(?:은|는)|(?:(?:것(?:은|이)|건|게|이|가)\s*)?아닌)(?=$|\s|야(?=[.;?!]|$))/u.exec(rest)
         ?? (!wasInactive ? /^\s*되지\s*않(?:은|는)(?=$|\s)/u.exec(rest) : null);
-      if (!negation && /^(?:\s|것|들|은|는|이|가|되|하|지|된|인)*(?:아닌|아니라|말고|제외|않|안)/u.test(rest)) ambiguities.push("status:ambiguous_predicate");
+      if (wasInactive && /^\s*되지\s*않(?:은|는)(?=$|\s)/u.test(rest)) ambiguities.push("ambiguous_scope");
+      else if (!negation && /^(?:\s|것|들|은|는|이|가|되|하|지|된|인)*(?:아닌|아니라|말고|제외|않|안)/u.test(rest)) ambiguities.push("status:ambiguous_predicate");
       else {
         const negative = wasInactive !== !!negation;
         filter = { field: "status", operator: "in", value: negative ? INACTIVE : ACTIVE };

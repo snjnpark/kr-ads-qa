@@ -145,7 +145,6 @@ function evidenceClarification(evidence: ReturnType<typeof queryEvidence>): stri
   if (evidence.ambiguities.includes("unrepresented_condition")) return "해석하지 못한 추가 조건이 있습니다. 적용할 조건을 나누어 구체적으로 알려주세요.";
   if (evidence.ambiguities.includes("ambiguous_scope")) return "부정 표현의 범위가 분명하지 않습니다. 값이 있는지 없는지를 구체적으로 알려주세요.";
   if (evidence.ambiguities.includes("ambiguous_field_attachment")) return "각 항목에 적용할 조건을 구분해 주세요. 일예산과 총예산 중 어느 조건인지 알려주세요.";
-  if (evidence.ambiguities.some(item => item.endsWith(":ambiguous_predicate"))) return "부정 표현의 범위가 분명하지 않습니다. 각 항목의 조건을 긍정 표현으로 구체적으로 알려주세요.";
   if (evidence.ambiguities.some(item => /multiple_predicates|multiple_operands|mixed_logic|nested_logic/u.test(item)))
     return "같은 항목의 여러 조건이나 중첩된 연결은 나누어 질문해 주세요.";
 }

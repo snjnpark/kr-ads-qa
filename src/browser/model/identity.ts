@@ -1,7 +1,7 @@
 import type { SemanticInput } from "./engine-core";
 export type { SemanticInput } from "./engine-core";
 export const QUESTION_SCHEMA_VERSION = "ads-audience-objective-v1";
-export const SEMANTIC_POLICY_VERSION = "typed-input-order-commercial-conflict-view-abstention-goal-ambiguity-v4";
+export const SEMANTIC_POLICY_VERSION = "typed-input-order-commercial-conflict-view-abstention-goal-ambiguity-temporal-scope-v5";
 export function checkedText(value: unknown): string {
   if (
     typeof value !== "string" ||

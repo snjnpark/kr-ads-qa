@@ -153,8 +153,11 @@ function explicitlyUndecidedObjective(state: Record<string, string>) {
   return Object.values(state).some((text) => {
     // Quoted management labels and unfinished quotations do not declare an objective.
     const unquoted = text.replace(/"[^"]*"|'[^']*'|`[^`]*`|“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』/gu, "\u0000");
-    return !/["'`“‘「『]/u.test(unquoted) &&
-      /(?:^|[\s:：,，;；.!?。！？])주목적(?:을|은|이)?\s*(?:정하지\s*않음|미정(?:임|이다|입니다)?)\s*[.!。！]*$/u.test(unquoted);
+    const declaration = /(?:^|[\s:：,，;；.!?。！？])주목적(?:을|은|이)?\s*(?:정하지\s*않음|미정(?:임|이다|입니다)?)\s*[.!。！]*$/u.exec(unquoted);
+    if (/["'`“‘「『]/u.test(unquoted) || !declaration) return false;
+    // A later present marker supersedes historical notes within this source field.
+    const temporal = [...unquoted.slice(0, declaration.index).trimEnd().matchAll(/(?:^|[\s:：,，;；.!?。！？])(과거(?:에(?:는)?|의|는)?|예전(?:에(?:는)?|의|은)?|당시(?:에(?:는)?|의|는)?|이전에는|이전의(?=$)|현재(?:는|의)?|지금(?:은|의)?)(?=$|[\s:：,，;；.!?。！？])/gu)].at(-1)?.[1];
+    return temporal === undefined || /^(?:현재|지금)/u.test(temporal);
   });
 }
 function containsModelInstruction(state: Record<string, string>) {
