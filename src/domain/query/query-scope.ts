@@ -72,7 +72,7 @@ const childRole = `(?:하위|아래|밑)(?:\\s*범위)?(?:의|에서|에|만)?(?
 const referencePattern = new RegExp(`(?<![\\p{L}\\p{N}_])(?:그\\s*중|이\\s*중|${priorTime}\\s*${retrieval}(?:\\s*(?:${resultNoun}|${referenceObject}))?${referenceTail}|${priorTime}\\s*${resultNoun}${referenceTail}|${priorTime}\\s*${referenceObject}(?=\\s*(?:의\\s*)?${childRole})|여기서|(?:이|그|해당)\\s*(?:${resultNoun}|${referenceObject})${referenceTail})`, "gu");
 const directChildRole = `(?:에|에서)\\s*(?:속한|연결된|포함된)(?=\\s*${childObject})`;
 const childReferenceRole = new RegExp(`^\\s*(?:(?:(?:의|에서|에는|에|중에서|중)\\s*)?(?:${referenceObject}(?:의|에서|에)?\\s*)?${childRole}|${directChildRole})`, "u");
-const freshSearchRole = /^\s*(?:(?:의\s*)?범위(?:를|는)?\s*적용하지\s*않고\s*(?:새롭게|새로|처음부터)\s*(?:조회|검색|찾)|(?:와|과)\s*관계없이\s*(?:새롭게|새로|처음부터)\s*(?:조회|검색|찾)|에\s*제한하지\s*않고\s*(?:확인|조회|검색)|(?:를|을)\s*사용하지\s*않고\s*(?:새롭게|새로|처음부터)\s*(?:조회|검색|찾))/u;
+const freshSearchRole = /^\s*(?:(?:의\s*)?범위(?:를|는)?\s*적용하지\s*않고\s*(?:새롭게|새로|처음부터)\s*(?:(?:조회|검색)(?:해서|하여)?|찾)|(?:와|과)\s*관계없이\s*(?:새롭게|새로|처음부터)\s*(?:(?:조회|검색)(?:해서|하여)?|찾)|에\s*제한하지\s*않고\s*(?:확인|조회|검색)(?:해서|하여)?|(?:를|을)\s*사용하지\s*않고\s*(?:새롭게|새로|처음부터)\s*(?:(?:조회|검색)(?:해서|하여)?|찾))/u;
 const freshSearchReference = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${priorTime}|기존|이|그|해당)\\s*${resultNoun}`, "gu");
 
 function literalScopeEvidence(text: string) {
@@ -162,9 +162,14 @@ function literalScopeEvidence(text: string) {
     const carrier = (mention.negative ? complementCarrier : vendorCarrier).exec(text.slice(mention.exclusion_end));
     if (carrier) spans.push([mention.exclusion_end, mention.exclusion_end + carrier[0].length]);
     if (reference && !mention.negative) {
-      const narrowing = /^\s*(?:으로|로)\s*(?:범위(?:를)?\s*)?좁혀(?:서)?(?=$|[\s,.;?!])/u.exec(clean.slice(mention.end));
+      const narrowing = /^\s*(?:으로|로)\s*(?:범위(?:를)?\s*)?(?:좁혀|한정해)(?:서)?(?=$|[\s,.;?!])/u.exec(clean.slice(mention.end));
       if (narrowing) spans.push([mention.end, mention.end + narrowing[0].length]);
     }
+  }
+  if (reference) for (const target of matches.filter(mention => !mention.name_field)) {
+    const owner = mentions.some(vendor => !vendor.negative && vendor.end <= target.start && /^\s*(?:의|에서)?\s*$/u.test(clean.slice(vendor.end, target.start)));
+    const restriction = owner && /^\s*(?:으로|로)\s*한정해(?:서)?(?=$|[\s,.;?!])/u.exec(clean.slice(target.end));
+    if (restriction) spans.push([target.end, target.end + restriction[0].length]);
   }
   const introduction = queryIntroduction.exec(text);
   if (introduction) spans.push([introduction.index, introduction.index + introduction[0].length]);
@@ -202,7 +207,7 @@ function literalScopeEvidence(text: string) {
       throw new Clarification("계정 필드의 조건을 광고 항목의 조건으로 바꿀 수 없습니다. 조회할 계정은 화면에서 선택해 주세요.");
   }
   return { scope: { ...(entity ? { entity } : {}), platforms, ...(reference ? { reference } : {}) }, spans,
-    targets: matches.filter(mention => !mention.name_field).map(({ start, end }) => ({ start, end })) };
+    targets: matches.filter(mention => !mention.name_field).map(({ start, end, entity }) => ({ start, end, entity })) };
 }
 
 export function queryLiteralScope(text: string) {
@@ -211,10 +216,12 @@ export function queryLiteralScope(text: string) {
 
 /** Remove only scope spans proved by the same interpretation used by queryLiteralScope. */
 export function queryRequestEvidence(text: string) {
-  const { spans, targets } = literalScopeEvidence(text);
+  const { scope, spans, targets } = literalScopeEvidence(text);
   const characters = text.split("");
   for (const [start, end] of spans) characters.fill(" ", start, end);
   const declarations = consumeQueryDeclarations(text, characters.join(""), targets);
+  if (declarations.clauses.some(clause => targets.filter(target => target.start >= clause.span[0] && target.end <= clause.span[1]).at(-1)!.entity !== scope.entity))
+    throw new Clarification("선언한 조회 대상과 실제 조회 대상이 다릅니다. 대상 종류를 하나로 지정해 주세요.");
   return { residual: declarations.text, clauses: declarations.clauses };
 }
 

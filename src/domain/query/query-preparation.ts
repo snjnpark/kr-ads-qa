@@ -99,8 +99,8 @@ export function budgetCurrency(text: string): QueryPlan["currency"] {
 function idFacts(text: string) {
   return [...queryScopeText(text).matchAll(/(?:원본\s*(?:(?:캠페인|광고\s*(?:그룹|세트)?|(?:애셋|에셋)\s*그룹|소재|키워드)\s*)?)?(?:\bID\b|아이디)/giu)].flatMap(match => {
     const tail = text.slice(match.index + match[0].length);
-    const quoted = /^(?:(?:가|는|[:：])?\s*|를\s*(?:대조하면|확인하면)\s*)(?:'([^']+)'|"([^"]+)"|“([^”]+)”|‘([^’]+)’|`([^`]+)`)/u.exec(tail);
-    const bare = tail.match(/^(?:가|는|[:：])?\s*([A-Za-z0-9][A-Za-z0-9_-]{0,63})/u);
+    const quoted = /^(?:(?:\s*(?:의\s*)?값)?(?:이|가|은|는|[:：])?\s*|를\s*(?:대조하면|확인하면)\s*)(?:'([^']+)'|"([^"]+)"|“([^”]+)”|‘([^’]+)’|`([^`]+)`)/u.exec(tail);
+    const bare = tail.match(/^(?:\s*(?:의\s*)?값)?(?:이|가|은|는|[:：])?\s*([A-Za-z0-9][A-Za-z0-9_-]{0,63})/u);
     const operand = quoted ?? bare;
     if (!operand) return [];
     const value = quoted ? quoted.slice(1).find(part => part !== undefined)! : bare![1];
