@@ -1,5 +1,6 @@
 const randomBytes = (size: number) => ({ toString: (_encoding: string) => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(size)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "") });
 import { z } from "../lib/validation";
+import { csvText } from "../lib/csv";
 import { setOperationSignal } from "./operation-context";
 import { BrowserApplication as Application } from "./application";
 import { readSettings, saveSettings } from "./settings";
@@ -230,20 +231,7 @@ export function csvBytes(
   original: Record<string, unknown>[],
 ): Uint8Array<ArrayBuffer> {
   const rows = publicData(original) as Record<string, unknown>[];
-  const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
-  function cell(value: unknown): string {
-    let text =
-      value == null
-        ? ""
-        : typeof value === "object"
-          ? JSON.stringify(value)
-          : String(value);
-    if (/^[\s\uFEFF]*[=+\-@\t\r]/.test(text)) text = `'${text}`;
-    return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-  }
-  return new TextEncoder().encode(
-    `\uFEFF${[columns.map(cell).join(","), ...rows.map((row) => columns.map((column) => cell(Object.hasOwn(row, column) ? row[column] : undefined)).join(","))].join("\r\n")}\r\n`,
-  );
+  return new TextEncoder().encode(`${csvText(rows)}\r\n`);
 }
 
 export function createApi(

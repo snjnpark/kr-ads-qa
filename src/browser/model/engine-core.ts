@@ -3,6 +3,8 @@ import type { QueryContext } from "../../server/query";
 import { interpretQuery } from "../../server/query-model";
 import type { ModelLoadOptions } from "./cache";
 import { MODEL_VERSION } from "./model-version";
+import { QUESTION_SCHEMA_VERSION } from "./identity";
+export { QUESTION_SCHEMA_VERSION, SEMANTIC_POLICY_VERSION } from "./identity";
 import { createBrowserAgent } from "./inference";
 import type { ModelConfig } from "./types";
 export const INTENTS = {
@@ -52,9 +54,6 @@ export const SEMANTIC_QUESTIONS = {
     },
   },
 } satisfies Record<string, ChoiceQuestion>;
-export const QUESTION_SCHEMA_VERSION = "ads-audience-objective-v1";
-export const SEMANTIC_POLICY_VERSION =
-  "typed-input-order-commercial-conflict-view-abstention-v3";
 export type SemanticInput = {
   platform: string;
   account_id: string;

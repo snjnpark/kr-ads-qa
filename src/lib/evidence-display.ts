@@ -1,9 +1,4 @@
-import { FIELD_LABELS, valueText } from "@/components/shared";
-import {
-  conditionText,
-  entityNames,
-  platformNames,
-} from "@/components/secondary/WorkspaceParts";
+import { FIELD_LABELS, valueText, conditionText, entityNames, platformNames } from "@/lib/display";
 import { parseStoredValue } from "@/lib/evidence";
 
 const operationNames: Record<string, string> = {
