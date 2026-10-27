@@ -132,6 +132,7 @@ export function createApi(
           invalidateContexts(activeTab);
           previousContext = structuredClone(activeTab.context); previousDraft = null;
         }
+        if (method === "GET" && path === "/session") return json({ csrf_token: session.csrf });
         if (method === "GET" && path === "/state") {
           const scope = validateScope(
             parsed(scopeSchema, {

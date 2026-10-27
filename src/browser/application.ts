@@ -1,7 +1,8 @@
 import { entityRows, withResultIdentity as resultIdentity, auditRows as resultRows } from "./application/rows";
-import { executeApplicationQuery, type QueryResponse } from "./query";
+import { executeApplicationQuery, type QueryResponse, type QueryExecutionOptions } from "./query";
 export { actualConfiguration, type QueryResponse } from "./query";
 import { sha256 } from "./crypto";
+import { canonicalJson } from "./rules";
 const randomUUID = () => crypto.randomUUID();
 import {
   createCoverage,
@@ -60,6 +61,7 @@ export class BrowserApplication {
   catalog = new Map<string, Account>();
   coverage = createCoverage();
   lastSync: string | null = null;
+  collectionGeneration = "";
   hydratedRevision = -1;
   source = "";
   private scope = "";
@@ -90,6 +92,7 @@ export class BrowserApplication {
   async initialize() {
     this.hydratedRevision = this.storage.revision;
     this.catalog.clear(); this.entities = []; this.accounts = []; this.coverage = createCoverage(); this.lastSync = null;
+    this.loadedScope = {}; this.scope = "";
     for (const account of this.storage.list<Account>("ad_accounts")) this.catalog.set(`${account.platform}/${account.account_id}`, account);
     const saved = this.storage.get<Json>("collections", "active");
     if (saved && Array.isArray(saved.entities)) {
@@ -101,6 +104,15 @@ export class BrowserApplication {
       this.scope = scopeKey(this.loadedScope);
       this.source = "이 브라우저의 저장 데이터";
     }
+    await this.identifyCollection();
+  }
+  private async identifyCollection() {
+    // A history write changes the storage revision, but does not change the advertising collection.
+    // Hashing the actual loaded generation also restores its identity after an atomic rollback.
+    this.collectionGeneration = await sha256(canonicalJson({
+      collected_at: this.lastSync, scope: this.loadedScope,
+      accounts: this.accounts, entities: this.entities, coverage: this.coverage,
+    }));
   }
   assertAvailable() {
     if (this.backupRestored) throw new Error("백업 복원을 마쳤습니다. 새로고침한 뒤 인증 정보를 다시 연결해 주세요.");
@@ -178,6 +190,8 @@ export class BrowserApplication {
         this.lastSync = active.last_sync ?? null;
       }
       this.source = "이 브라우저의 저장 데이터 · API 재연결 필요";
+      this.loadedScope = structuredClone(scope); this.scope = scopeKey(scope);
+      await this.identifyCollection();
       return this.entities;
     }
     await Promise.all(
@@ -284,6 +298,7 @@ export class BrowserApplication {
       complete: false, entities: this.entities, accounts: this.accounts, coverage,
       at: this.lastSync, scope: this.loadedScope,
     });
+    await this.identifyCollection();
     return this.entities;
   }
   async ensureScope(scope: Scope) {
@@ -478,8 +493,9 @@ export class BrowserApplication {
     text: string,
     context: QueryContext = emptyContext(),
     scope: Scope = {},
+    options: QueryExecutionOptions = {},
   ): Promise<QueryResponse> {
-    return executeApplicationQuery(this, text, context, scope);
+    return executeApplicationQuery(this, text, context, scope, options);
   }
   anomalies(scope: Scope) {
     const entities = this.entities.filter((e) => selected(e, scope)),

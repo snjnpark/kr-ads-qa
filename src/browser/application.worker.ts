@@ -56,7 +56,7 @@ async function localCall(call: Call): Promise<unknown> {
   const method = call.method ?? "GET";
   if (call.id !== -1 && (!cookie || !csrf)) {
     // The first concurrent screen reads share one local session initialization.
-    bootstrap ??= localCall({ id: -1, path: "/state" }).finally(() => { bootstrap = undefined; });
+    bootstrap ??= localCall({ id: -1, path: "/session" }).finally(() => { bootstrap = undefined; });
     await bootstrap;
   }
   const request = new Request(new URL(`/api${call.path}`, "https://browser.invalid"), {
