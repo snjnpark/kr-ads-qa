@@ -20,6 +20,7 @@ export type Query = {
   text: string;
   currency: string | null;
   reference_time: Date;
+  date_expression?: string;
 };
 export type QueryContext = {
   result_keys: string[];
@@ -28,6 +29,7 @@ export type QueryContext = {
   entity: string;
   has_results: boolean;
   scope?: string;
+  data_generation?: string;
 };
 export const emptyContext = (): QueryContext => ({
   result_keys: [],

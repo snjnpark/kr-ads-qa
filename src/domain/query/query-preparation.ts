@@ -1,10 +1,11 @@
 import Decimal from "decimal.js";
 import { literalProducts, unquotedAdText, queryScopeText } from "../../lib/ad-products";
-import { Clarification, dateRange, type QueryContext } from "./query";
+import { ACTIVE, INACTIVE, Clarification, dateRange, type QueryContext } from "./query";
 import { queryScopeEvidence, queryRequestEvidence, childEntity, assertEntityCapabilities } from "./query-scope";
 import { analyzeQueryEvidence, queryPlanRemainder, type GroundedQueryFilter } from "./query-evidence";
 import { analyzeQueryAnswerability, withQueryEvidence, type QueryAnswerability } from "./query-answerability";
 import type { QueryPlan, QueryTrace } from "./query-model";
+import { fieldPaths } from "./query-contract";
 import { projectPreparedRequest, snapshotQueryInput, type RequestSpec } from "./query-request";
 
 const MONEY_UNITS: Record<string, number> = { 억: 100000000, 만: 10000, 천: 1000, 백: 100, 십: 10 };
@@ -175,6 +176,48 @@ export function assertQueryInput(text: string) {
   if (!text.trim() || text.length > 2000) throw new Clarification("2,000자 이내의 광고 설정 질문을 입력해 주세요.");
 }
 
+export function requestWorkflow(text: string, now: Date, timezone: string, entity?: QueryPlan["entity"]): NonNullable<RequestSpec["workflow"]> {
+  const clean = queryScopeText(text);
+  return {
+    policy_terms: [text], requires_policy: /가이드|기준으로/u.test(clean), violations_only: /위반/u.test(clean),
+    history: { period: dateRange(clean, now, timezone), fields: [ ...(/예산/u.test(clean) ? ["budget" as const] : []), ...(/타겟팅/u.test(clean) ? ["targeting" as const] : []) ],
+      ...(entity ? {entity} : {}), increased_only: /증가/u.test(clean) },
+  };
+}
+
+function planSelection(text: string, source: { typed: ReturnType<typeof queryEvidence>; numeric: ReturnType<typeof queryLiterals>; request: QueryAnswerability; evidence: Set<string>; modelFields: string[]; unquoted: string }): NonNullable<RequestSpec["selection"]> {
+  const { typed, numeric, request, evidence, modelFields, unquoted } = source;
+  const exactName = exactNameRequested(text), nameOperand = boundNameOperand(text);
+  const name = namePredicateText(text)?.match(/(?:이름|명칭)[^,;]{0,100}?(?:포함(?:(?:되지|하지)\s*않[가-힣]*|\s*안\s*[가-힣]+|[가-힣]*)|(?:안\s*)?들어(?:\s*있[가-힣]*|[가-힣]*)(?:\s*않[가-힣]*)?|제외[가-힣]*|빠진|없(?:는|고|거나|든)|있(?:는|고|거나|든))/u)?.[0];
+  const filters: NonNullable<RequestSpec["selection"]>["filters"] = [];
+  for (const [id, field] of Object.entries(fieldPaths)) {
+    if (!evidence.has(id) && !(id === "lifetime" && modelFields.includes(id))) continue;
+    if (typed.filters.some(fact => fact.filter.field === field)) continue;
+    const alternatives: QueryPlan["filters"] = [];
+    if ((id === "daily" || id === "lifetime") && !numeric.amounts.length || id === "end") alternatives.push({field,operator:"is_empty"},{field,operator:"is_not_empty"});
+    if (id === "status") alternatives.push({field,operator:"in",value:ACTIVE},{field,operator:"in",value:INACTIVE});
+    if (id === "created" && numeric.dates.length === 1) alternatives.push({field,operator:"between",value:numeric.dates[0][1]});
+    if (id === "name" && (name || exactName)) {
+      const operators: QueryPlan["filters"][number]["operator"][] = exactName ? ["eq"] : name && !/말고|나머지/u.test(unquotedAdText(text)) ? [/포함\s*(?:되지|하지|안)|안\s*(?:포함|들어)|들어(?:\s*있)?[가-힣]*\s*않|제외|빠진|없(?:는|고|거나|든)/u.test(name) ? "not_contains" : "contains"] : ["contains","not_contains","eq"];
+      for (const value of new Set(nameOperand ? [nameOperand] : [...numeric.quotedStrings,...numeric.strings]))
+        for (const operator of operators) if (text.includes(value)) alternatives.push({field,operator,value});
+    }
+    filters.push({field,alternatives});
+  }
+  const genericBudget = !/일\s*예산|하루\s*예산/u.test(unquoted);
+  const required_fields = (request.operation && ["audit", "policy", "history"].includes(request.operation) ? [] : typed.relevant_fields).flatMap(id => {
+    if (id === "daily" && genericBudget && !typed.filters.some(fact => fact.field_id === "daily") && typed.filters.some(fact => fact.field_id === "lifetime")) return [];
+    return [{ fields: id === "daily" && genericBudget && modelFields.includes("lifetime") ? ["budget.daily", "budget.lifetime"] : [fieldPaths[id]], unless_semantic: id === "name" && !name && !exactName }];
+  });
+  const operations: QueryPlan["operation"][] = request.operation ? [request.operation] : ["find"];
+  const semantics: QueryPlan["semantic"][] = request.semantic ? [request.semantic] : typed.complete ? [null] : [null, "retarget", "purchase_mismatch", "branding"];
+  return { filters, required_fields, source_complete: typed.complete,
+    logic: typed.logical_operator!,
+    currency: budgetCurrency(unquoted), name_exact: exactName,
+    shapes: operations.flatMap(operation => semantics.filter(semantic => !queryPlanRemainder(typed.residual, operation, semantic)).map(semantic => ({operation,semantic}))),
+  };
+}
+
 // Both inference and direct-plan validation consume the same checked source facts.
 function readPreparedQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace>, capture: (value: ReturnType<typeof queryScopeEvidence>) => void) {
   trace.outcome = "clarification";
@@ -261,6 +304,12 @@ function readPreparedQuery(text: string, context: QueryContext | undefined, now:
   if (!modelFields.length && queryPlanRemainder(typed.residual, request.operation, request.semantic))
     throw new Clarification("해석하지 못한 추가 조건이 있습니다. 적용할 조건을 나누어 구체적으로 알려주세요.");
   const spec = projectPreparedRequest(snapshotQueryInput(text, context, now, timezone), { typed, request, literalScope, scopeEntity, products, modelFields, clauses, scope_roles: scopeEvidence.roles });
+  spec.selection = planSelection(text, { typed, numeric, request, evidence, modelFields, unquoted });
+  spec.workflow = requestWorkflow(text, now, timezone, literalScope.entity);
+  if (request.operation && ["audit", "policy", "history", "create_rule"].includes(request.operation)) {
+    spec.evidence.push({id:"workflow:options", source_id:"question", role:"workflow", owner:null, span:[0,text.length], text, value:structuredClone(spec.workflow)});
+    spec.obligations.push({id:"workflow:options", kind:"workflow", owner:null, evidence_ids:["workflow:options"], basis:"explicit"});
+  }
   return { unquoted, numeric, typed, request, evidence, literalScope, scopeEntity, products, modelFields, spec };
 }
 export type PreparedQuery = ReturnType<typeof readPreparedQuery>;

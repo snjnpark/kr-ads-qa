@@ -18,7 +18,7 @@ worker.onmessage = event => {
       else throw new Error("지원하지 않는 모델 작업입니다.");
       worker.postMessage({ type: "result", id: request.id, result });
     } catch (error) {
-      worker.postMessage({ type: "error", id: request.id, error: { name: error instanceof Error ? error.name : "Error", message: error instanceof Error ? error.message : "브라우저 모델을 실행하지 못했습니다.", ...(error instanceof QueryModelError ? { trace: error.trace } : {}) } });
+      worker.postMessage({ type: "error", id: request.id, error: { name: error instanceof Error ? error.name : "Error", message: error instanceof Error ? error.message : "브라우저 모델을 실행하지 못했습니다.", ...(error instanceof QueryModelError ? { trace: error.trace, request: error.request } : {}) } });
     }
   });
 };

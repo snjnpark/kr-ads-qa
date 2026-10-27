@@ -47,7 +47,7 @@ export class BrowserLayaEngine {
       this.pending.delete(response.id);
       if (response.type === "result") pending.resolve(response.result);
       else {
-        const error = response.error.trace ? new QueryModelError(response.error.message, response.error.trace) : new Error(response.error.message); error.name = response.error.name;
+        const error = response.error.trace ? new QueryModelError(response.error.message, response.error.trace, response.error.request) : new Error(response.error.message); error.name = response.error.name;
         if (pending.method === "load" || !this.ready) this.emit({ stage: "error", loaded: this.progress.loaded, total: MODEL_TOTAL_BYTES, message: error.message }); pending.reject(error);
       }
     };

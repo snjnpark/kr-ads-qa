@@ -1,19 +1,19 @@
 import type { ChoiceQuestion } from "../../browser/model/types";
-import { unquotedAdText, queryScopeText } from "../../lib/ad-products";
 import { ACTIVE, INACTIVE, Clarification, type Query, type QueryContext } from "./query";
 
-import { literalListOperation, descendantType, assertEntityCapabilities } from "./query-scope";
+import { literalListOperation } from "./query-scope";
 import type { analyzeQueryEvidence } from "./query-evidence";
-import { queryPlanRemainder } from "./query-evidence";
 import { explicitReadRequest } from "./query-language";
-import { analyzeQueryAnswerability, requestPlanMismatch, type QueryAnswerability } from "./query-answerability";
-import { preprocessQuery, namePredicateText, boundNameOperand, exactNameRequested, budgetCurrency, type PreparedQuery } from "./query-preparation";
-import { fieldPaths, queryPlanSchema, type QueryPlan } from "./query-contract";
+import { analyzeQueryAnswerability, type QueryAnswerability } from "./query-answerability";
+import { prepareRequest, boundNameOperand, exactNameRequested, budgetCurrency, type PreparedQuery } from "./query-preparation";
+import { fieldPaths, type QueryPlan } from "./query-contract";
 export { queryPlanSchema, type QueryPlan } from "./query-contract";
 export { queryLiterals } from "./query-preparation";
 export { queryLiteralScope } from "./query-scope";
 
-export const QUERY_PLAN_VERSION = "model-conditions-v14";
+import { completeRequest, compileExecutionPlan, projectQuery } from "./query-plan";
+import type { RequestSpec } from "./query-request";
+export const QUERY_PLAN_VERSION = "request-plan-v1";
 export type QueryTrace = {
   source: "laya" | "deterministic_mock" | "deterministic_literal"; version: string; model_version: string;
   outcome: "query" | "clarification" | "unsupported" | "uncertain" | "validation" | "inference";
@@ -30,7 +30,7 @@ export type QueryTrace = {
   plan?: unknown;
 };
 export class QueryModelError extends Clarification {
-  constructor(message: string, readonly trace: QueryTrace) { super(message); }
+  constructor(message: string, readonly trace: QueryTrace, readonly request?: RequestSpec) { super(message); }
 }
 type Choice = { label: string | null; scores: Record<string, number> };
 export type Choose = (state: unknown, questions: Record<string, ChoiceQuestion>) => Promise<Record<string, Choice>>;
@@ -49,109 +49,17 @@ export function requestKindQuestions(entity?: string, general = false) {
 }
 export const queryRequestState = (text: string, context?: QueryContext) => ({ request: text, previous_results: context?.has_results ?? false, ...(context?.has_results ? { previous_context: { entity: context.entity, platforms: context.platforms } } : {}) });
 
-// Reject explicit contradictions and dropped operands; never replace a model's answer with another plan.
-function assertExplicitConditions(plan: QueryPlan, text: string, prepared: PreparedQuery) {
-  if (!["find", "count", "compare", "create_rule"].includes(plan.operation)) return;
-  const { unquoted: clean, typed: evidence } = prepared;
-  const fail = () => { throw new Clarification("질문에 명시한 조건과 모델의 해석이 일치하지 않습니다. 조건을 나누어 다시 질문해 주세요."); };
-  const filter = (field: string) => plan.filters.find(item => item.field === field);
-  const grounded = new Set(evidence.filters.map(item => item.filter.field));
-  if (plan.filters.length > 1 && (evidence.complete
-    ? evidence.logical_operator !== plan.logical_operator
-    : /또는|혹은|거나|아니면|\bOR\b/iu.test(clean) && plan.logical_operator !== "OR")) fail();
-  const exactName = exactNameRequested(text);
-  const nameOperand = grounded.has("name") ? undefined : boundNameOperand(text);
-  if (nameOperand && filter("name")?.value !== nameOperand) fail();
-  const name = namePredicateText(text)?.match(/(?:이름|명칭)[^,;]{0,100}?(?:포함(?:(?:되지|하지)\s*않[가-힣]*|\s*안\s*[가-힣]+|[가-힣]*)|(?:안\s*)?들어(?:\s*있[가-힣]*|[가-힣]*)(?:\s*않[가-힣]*)?|제외[가-힣]*|빠진|없(?:는|고|거나|든)|있(?:는|고|거나|든))/u)?.[0];
-  if (name && !filter("name")) fail();
-  if (filter("name") && !grounded.has("name") && !name && !exactName) fail();
-  if (!grounded.has("name") && exactName && filter("name")?.operator !== "eq") fail();
-  if (name && !grounded.has("name") && !exactName && !/말고|나머지/u.test(unquotedAdText(text))) {
-    const expected = /포함\s*(?:되지|하지|안)|안\s*(?:포함|들어)|들어(?:\s*있)?[가-힣]*\s*않|제외|빠진|없(?:는|고|거나|든)/u.test(name) ? "not_contains" : "contains";
-    if (filter("name")?.operator !== expected) fail();
-  }
-}
-
+/** Direct callers build one request and pass through the same source/plan validator. */
 export function validateQueryPlan(raw: unknown, text: string, context?: QueryContext, now = new Date(), timezone = "Asia/Seoul"): Query {
-  return validatePreparedQuery(raw, text, context, now, timezone);
+  const preparation = prepareRequest(text, context, now, timezone);
+  if (preparation.kind === "rejected") throw preparation.error;
+  const request = completeRequest(preparation.spec, raw, context);
+  return projectQuery(compileExecutionPlan(request, raw, context), request);
 }
-function validatePreparedQuery(raw: unknown, text: string, context: QueryContext | undefined, now: Date, timezone: string, prepared?: PreparedQuery): Query {
-  const parsed = queryPlanSchema.safeParse(raw);
-  if (!parsed.success) throw new Clarification("조회 조건 형식을 확인하지 못했습니다. 질문을 구체적으로 입력해 주세요.");
-  const plan = parsed.data;
-  const checked = prepared ?? preprocessQuery(text, context, now, timezone);
-  const { typed: evidence, numeric: literals, literalScope, request } = checked;
-  const mismatch = requestPlanMismatch(request, plan);
-  if (mismatch) throw new Clarification(mismatch);
-  if (evidence.complete && !request.semantic && plan.semantic)
-    throw new Clarification("질문에 명시한 목적과 조회 계획이 일치하지 않습니다. 근거 없는 의미 조건을 추가할 수 없습니다.");
-  if (["find", "count", "compare", "create_rule"].includes(plan.operation)) {
-    for (const id of evidence.relevant_fields) {
-      const field = fieldPaths[id];
-      // A generic budget introduction does not add daily to an explicit lifetime predicate.
-      if (id === "daily" && !/일\s*예산|하루\s*예산/u.test(queryScopeText(text)) &&
-          !evidence.filters.some(item => item.field_id === "daily") && plan.filters.some(filter => filter.field === "budget.lifetime")) continue;
-      if (!(id === "name" && plan.semantic) && !plan.filters.some(filter => filter.field === field))
-        throw new Clarification("질문에 명시한 조건과 모델의 해석이 일치하지 않습니다. 지정한 항목의 조건을 생략할 수 없습니다.");
-    }
-  }
-  for (const ambiguity of evidence.ambiguities.filter(item => item.endsWith(":ambiguous_predicate"))) {
-    const field = fieldPaths[ambiguity.split(":")[0]];
-    if (field && !plan.filters.some(filter => filter.field === field))
-      throw new Clarification("부정 표현이 포함된 조건을 생략할 수 없습니다. 원하는 조건을 긍정 표현으로 다시 알려주세요.");
-  }
-  for (const fact of evidence.filters) {
-    const actual = plan.filters.find(filter => filter.field === fact.filter.field);
-    if (!actual || actual.operator !== fact.filter.operator || JSON.stringify(actual.value) !== JSON.stringify(fact.filter.value))
-      throw new Clarification("질문에 명시한 조건과 모델의 해석이 일치하지 않습니다. 조건을 나누어 다시 질문해 주세요.");
-  }
-  if (literalScope.platforms.length && JSON.stringify([...plan.platforms].sort()) !== JSON.stringify([...literalScope.platforms].sort()))
-    throw new Clarification("질문에 명시한 매체의 조회 범위와 계획이 일치하지 않습니다.");
-  if (literalScope.entity && literalScope.entity !== plan.entity)
-    throw new Clarification("질문에 명시한 조회 대상과 계획이 일치하지 않습니다.");
-  if (plan.previous !== !!literalScope.reference || plan.children !== (literalScope.reference === "children"))
-    throw new Clarification("이전 결과 참조가 질문과 일치하지 않습니다. 새 조회와 이전 결과 조회를 바꿀 수 없습니다.");
-  if (new Set(plan.platforms).size !== plan.platforms.length)
-    throw new Clarification("조회 범위와 이전 검색 결과를 확인해 주세요.");
-  if (plan.previous && context?.platforms.length && plan.platforms.some(platform => !context.platforms.includes(platform)))
-    throw new Clarification("이전 결과의 매체와 다릅니다. 새로 검색할지 이전 결과를 좁힐지 알려주세요.");
-  if (plan.children && context && !descendantType(context.entity, plan.entity))
-    throw new Clarification("이전 결과 아래에서 조회할 수 있는 하위 대상을 지정해 주세요.");
-  if (["audit", "policy", "history"].includes(plan.operation) && plan.filters.length)
-    throw new Clarification("조건으로 좁힌 대상의 검수·정책·이력은 해당 화면에서 범위를 선택해 실행해 주세요.");
-  const seen = new Set<string>();
-  for (const filter of plan.filters) {
-    const id = Object.keys(fieldPaths).find(key => fieldPaths[key] === filter.field)!;
-    const genericBudget = id === "lifetime" && checked.evidence.has("daily") &&
-      !/일\s*예산|하루\s*예산/u.test(checked.unquoted);
-    if (!checked.evidence.has(id) && !genericBudget)
-      throw new Clarification("질문에 명시한 조건과 조회 계획이 일치하지 않습니다. 근거 없는 조건을 추가할 수 없습니다.");
-    if (seen.has(filter.field)) throw new Clarification("같은 항목의 여러 조건을 묶는 방법을 확인해 주세요.");
-    seen.add(filter.field);
-    // Canonical source facts have already matched field, operator and exact value above.
-    if (evidence.filters.some(fact => fact.filter.field === filter.field)) continue;
-    const noValue = filter.operator === "is_empty" || filter.operator === "is_not_empty";
-    if (noValue !== (filter.value === undefined)) throw new Clarification("조회 조건의 비교 값을 확인해 주세요.");
-    let valid = false;
-    if (filter.field.startsWith("budget.")) valid = noValue || (["eq", "ne", "gt", "gte", "lt", "lte"].includes(filter.operator) && typeof filter.value === "string" && literals.amounts.includes(filter.value));
-    if (filter.field === "status") valid = filter.operator === "in" && Array.isArray(filter.value) &&
-      [ACTIVE, INACTIVE].some(values => JSON.stringify([...values].sort()) === JSON.stringify([...filter.value as string[]].sort()));
-    if (filter.field === "schedule.end") valid = noValue;
-    if (filter.field === "name") valid = ["contains", "not_contains", "eq"].includes(filter.operator) && typeof filter.value === "string" && text.includes(filter.value);
-    if (filter.field === "created_at") valid = filter.operator === "between" && literals.dates.length === 1 && literals.dates.some(([, range]) => JSON.stringify(range) === JSON.stringify(filter.value));
-    if (!valid) throw new Clarification("질문의 항목과 비교 조건을 확인하고 다시 입력해 주세요.");
-    if (filter.field.startsWith("budget.") && (!noValue || literals.amounts.length > 0))
-      throw new Clarification("예산의 비교 방향과 설정 유무를 확인하지 못했습니다. 이상·이하·같음 등의 조건을 구체적으로 알려주세요.");
-  }
-  if (plan.filters.some(filter => filter.field.startsWith("budget.") && !["is_empty", "is_not_empty"].includes(filter.operator)) &&
-      plan.currency !== budgetCurrency(checked.unquoted))
-    throw new Clarification("질문에 명시한 예산 통화와 조회 계획이 일치하지 않습니다.");
-  const products = checked.products;
-  assertEntityCapabilities(plan.entity, plan.platforms, products);
-  assertExplicitConditions(plan, text, checked);
-  if (queryPlanRemainder(evidence.residual, plan.operation, request.semantic))
-    throw new Clarification("해석하지 못한 추가 조건이 있습니다. 적용할 조건을 나누어 구체적으로 알려주세요.");
-  return { ...plan, products, text, reference_time: now };
+function finishQuery(raw: unknown, prepared: PreparedQuery, context: QueryContext | undefined) {
+  const request = completeRequest(prepared.spec, raw, context);
+  const execution_plan = compileExecutionPlan(request, raw, context);
+  return { query: projectQuery(execution_plan, request), request, execution_plan };
 }
 const required = (selected: Record<string, Choice>, id: string) => {
   const label = selected[id]?.label;
@@ -176,8 +84,12 @@ export async function interpretQuery(text: string, context: QueryContext | undef
     for (const [id, answer] of Object.entries(answers)) trace.decisions[`${call}.${id}`] = answer;
     return answers;
   };
+  let activeRequest: RequestSpec | undefined;
   try {
-    const prepared = preprocessQuery(text, context, now, timezone, trace);
+    const preparation = prepareRequest(text, context, now, timezone, trace);
+    activeRequest = preparation.spec;
+    if (preparation.kind === "rejected") throw preparation.error;
+    const prepared = preparation.prepared;
     const { unquoted, numeric, typed, request, evidence, literalScope, scopeEntity, modelFields } = prepared;
     const simpleRead = !request.operation || ["find", "count"].includes(request.operation);
     const budgetPredicates = [...text.matchAll(/(일\s*예산|하루\s*예산|총\s*예산|전체\s*예산)(?:이|은|는|가)?\s*\+?\d[\d,]*(?:\.\d+)?\s*(이상|이하|초과|미만)(?:인)?/gu)];
@@ -187,20 +99,20 @@ export async function interpretQuery(text: string, context: QueryContext | undef
       if (operation) {
         const field = /총|전체/u.test(predicate[1]) ? "budget.lifetime" : "budget.daily";
         const operator = { 이상: "gte", 이하: "lte", 초과: "gt", 미만: "lt" }[predicate[2]];
-        const query = validatePreparedQuery({ platforms: literalScope.platforms, entity: scopeEntity, operation,
-          filters: [{ field, operator, value: numeric.amounts[0] }], logical_operator: "AND", previous: false, children: false, semantic: null, currency: null }, text, context, now, timezone, prepared);
-        trace.source = "deterministic_literal"; trace.preflight = "literal_budget"; trace.plan = query; trace.outcome = "query"; trace.stage = "complete";
-        return { query, trace };
+        const finished = finishQuery({ platforms: literalScope.platforms, entity: scopeEntity, operation,
+          filters: [{ field, operator, value: numeric.amounts[0] }], logical_operator: "AND", previous: false, children: false, semantic: null, currency: null }, prepared, context);
+        trace.source = "deterministic_literal"; trace.preflight = "literal_budget"; trace.plan = finished.query; trace.outcome = "query"; trace.stage = "complete";
+        return { ...finished, trace };
       }
     }
     const literalOperation = literalListOperation(text);
     if (simpleRead && literalOperation && scopeEntity && !literalScope.reference) {
-      const query = validatePreparedQuery({ platforms: literalScope.platforms, entity: scopeEntity, operation: literalOperation,
-        filters: [], logical_operator: "AND", previous: false, children: false, semantic: null, currency: null }, text, context, now, timezone, prepared);
+      const finished = finishQuery({ platforms: literalScope.platforms, entity: scopeEntity, operation: literalOperation,
+        filters: [], logical_operator: "AND", previous: false, children: false, semantic: null, currency: null }, prepared, context);
       trace.source = "deterministic_literal";
       trace.preflight = literalOperation === "count" ? "literal_count" : "literal_list";
-      trace.plan = query; trace.outcome = "query"; trace.stage = "complete";
-      return { query, trace };
+      trace.plan = finished.query; trace.outcome = "query"; trace.stage = "complete";
+      return { ...finished, trace };
     }
     trace.outcome = "uncertain";
     const completeEvidence = typed.complete && !!scopeEntity;
@@ -305,12 +217,12 @@ export async function interpretQuery(text: string, context: QueryContext | undef
     trace.plan = plan;
     trace.stage = "validation";
     trace.outcome = "validation";
-    const query = validatePreparedQuery(plan, text, context, now, timezone, prepared);
+    const finished = finishQuery(plan, prepared, context);
     trace.outcome = "query";
     trace.stage = "complete";
     if (!call) { trace.source = "deterministic_literal"; trace.preflight = "typed_evidence"; }
     trace.model_version = modelVersion();
-    return { query, trace };
+    return { ...finished, trace };
   } catch (error) {
     trace.model_version = modelVersion();
     if (error instanceof Clarification && !call && trace.stage === "input" && (trace.outcome === "clarification" || trace.outcome === "unsupported")) {
@@ -319,6 +231,6 @@ export async function interpretQuery(text: string, context: QueryContext | undef
         reasons: trace.answerability?.reasons.length ? trace.answerability.reasons : [reason] };
     }
     if (!(error instanceof Clarification)) trace.outcome = "inference";
-    throw new QueryModelError(error instanceof Clarification ? error.message : "모델에서 조회 조건을 확인하지 못했습니다. 다시 시도해 주세요.", trace);
+    throw new QueryModelError(error instanceof Clarification ? error.message : "모델에서 조회 조건을 확인하지 못했습니다. 다시 시도해 주세요.", trace, activeRequest);
   }
 }

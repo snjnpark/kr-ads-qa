@@ -1,4 +1,5 @@
 import type { QueryTrace } from "../../domain/query/query-model";
+import type { RequestSpec } from "../../domain/query/query-request";
 import type { QueryContext } from "../../domain/query/query";
 import type { Decision, SemanticInput } from "./engine-core";
 import type { ModelProgress } from "./types";
@@ -11,5 +12,5 @@ export type WorkerRequest =
 export type WorkerResponse =
   | { type: "progress"; value: ModelProgress }
   | { type: "result"; id: number; result: unknown }
-  | { type: "error"; id: number; error: { name: string; message: string; trace?: QueryTrace } };
+  | { type: "error"; id: number; error: { name: string; message: string; trace?: QueryTrace; request?: RequestSpec } };
 export type { Decision, SemanticInput, ModelProgress };

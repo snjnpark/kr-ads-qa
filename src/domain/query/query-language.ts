@@ -70,7 +70,7 @@ const operationRoots: Record<string, string> = {
   history: "(?:열람|조회|확인)", create_rule: "(?:제안|작성|생성)",
 };
 const operationPatterns = Object.fromEntries(Object.entries(operationRoots).map(([key, root]) => [key, new RegExp(`^(?:${root})(?:${finish}|(?:을|를)?\\s*${polite}|해\\s*${please})${edge}`, "u")]));
-const ruleRole = new RegExp(`^(?:여부(?:를)?\\s*)?(?:판정|검사|확인|점검)(?:할|하는|하도록)\\s*(?:(?:검사|검수)\\s*)?(?:규칙|룰)(?:\\s*(?:초안|작성안|안))?(?:을|를)?${edge}`, "u");
+const ruleRole = new RegExp(`^(?:(?:을|를)\\s*)?(?:여부(?:를)?\\s*)?(?:판정|검사|확인|점검)(?:할|하는|하도록)\\s*(?:(?:검사|검수)\\s*)?(?:규칙|룰)(?:\\s*(?:초안|작성안|안))?(?:을|를)?${edge}`, "u");
 const namedRule = new RegExp(`^(?:것(?:을|이)|을|를)?\\s*찾는\\s*(?:(?:검사|검수)\\s*)?(?:규칙|룰)(?:을|를)?${edge}`, "u");
 const operationTopic: Record<string, RegExp> = {
   compare: /^(?:들\s*)?(?:간(?:의|에)?|사이(?:의)?)\s*(?:서로\s*)?(?:다른\s*)?설정(?:을|이|값|의)?(?=$|\s)/u,

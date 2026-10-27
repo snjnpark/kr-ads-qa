@@ -20,7 +20,7 @@ export type QueryInput = {
 export type RequestEvidence = {
   id: string;
   source_id: string;
-  role: "filter" | "logic" | "target_declaration" | "operation" | "entity" | "scope" | "reference" | "relation" | "semantic";
+  role: "filter" | "logic" | "target_declaration" | "operation" | "entity" | "scope" | "reference" | "relation" | "semantic" | "workflow";
   owner: QueryPlan["entity"] | null;
   span: [number, number];
   text: string;
@@ -39,8 +39,27 @@ export type RequestCondition = {
   filter: QueryPlan["filters"][number];
   evidence_id: string;
 };
+export type RequestSelection = {
+  source_complete: boolean;
+  filters: {field: string; alternatives: QueryPlan["filters"]}[];
+  required_fields: {fields: string[]; unless_semantic: boolean}[];
+  logic: QueryPlan["logical_operator"] | null;
+  currency: QueryPlan["currency"];
+  name_exact?: boolean;
+  shapes: {operation: QueryPlan["operation"]; semantic: QueryPlan["semantic"]}[];
+};
+export type RequestWorkflow = {
+  policy_terms: string[];
+  requires_policy: boolean;
+  violations_only: boolean;
+  history?: {period: [number,number] | null; fields: ("budget" | "targeting")[]; entity?: QueryPlan["entity"]; increased_only: boolean};
+};
 export type RequestSpec = {
   input: QueryInput;
+  sources?: {id:string; text:string}[];
+  selection?: RequestSelection;
+  workflow?: RequestWorkflow;
+  date_expression?: string;
   state: "ready" | "needs_clarification" | "unsupported";
   entity: QueryPlan["entity"] | null;
   operation: QueryPlan["operation"] | null;
@@ -60,6 +79,7 @@ export type RequestSpec = {
   issues?: { code: string; message: string; kind: "clarification" | "unsupported" }[];
 };
 export type ExecutionPlan = {
+  workflow: RequestWorkflow;
   query: QueryPlan & { products: string[] };
   steps: { kind: "scope" | "previous" | "children" | "filter" | "semantic" | "workflow" | "result"; obligation_ids: string[] }[];
   data_requirements: string[];
@@ -129,7 +149,7 @@ export function projectPreparedRequest(input: QueryInput, source: ProjectionSour
     })),
     ...(source.scope_roles ?? []).map((fact, index): RequestEvidence => ({
       id: `scope:${index}`, source_id: "question", role: fact.kind, owner: fact.entity ?? null, span: [...fact.span], text: fact.text,
-      value: fact.kind === "entity" ? fact.entity : fact.kind === "relation" ? source.literalScope.reference === "children" ? "children" : "hierarchy" : fact.kind === "reference" ? source.literalScope.reference : [...source.literalScope.platforms],
+      value: fact.kind === "entity" ? fact.entity : fact.kind === "relation" ? source.literalScope.reference === "children" ? "children" : "hierarchy" : fact.kind === "reference" ? source.literalScope.reference : [...(source.literalScope.platforms.length ? source.literalScope.platforms : source.literalScope.reference ? input.previous.platforms : [])],
     })),
     ...(source.request.semantic ? [{ id: "semantic:request", source_id: "question", role: "semantic" as const, owner, span: [0, input.text.length] as [number, number], text: input.text, value: source.request.semantic }] : []),
   ];

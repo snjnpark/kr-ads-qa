@@ -227,6 +227,7 @@ const workflowCarriers: Partial<Record<QueryPlan["operation"], RegExp[]>> = {
   ],
   history: [new RegExp(`^일어난${boundary}`, "u"), new RegExp(`^설정(?:이)?\\s*(?:바뀐|변경된|수정된)\\s*(?:내역|기록|이력)(?:을|은|이)?${boundary}`, "u")],
   create_rule: [
+    new RegExp(`^(?:앞으로|향후)${boundary}`, "u"),
     new RegExp(`^(?:여부(?:를)?\\s*)?검사할${boundary}`, "u"),
     new RegExp(`^지\\s*(?:검사하는|확인할)\\s*(?:규칙|룰)(?:\\s*초안)?(?:을|를)?${boundary}`, "u"),
     new RegExp(`^(?:(?:규칙|룰)(?:\\s*초안)?(?:을|를)?\\s*)?만들어${requestEnding}${boundary}`, "u"),
