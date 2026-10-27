@@ -58,7 +58,8 @@ export function validateRequestPlan(raw: unknown, request: RequestSpec, context?
     const slotFacts = request.evidence.filter(fact => fact.role === "slot");
     const answerFacts = request.evidence.filter(fact => fact.source_id === "answer");
     if (extraSources.length !== 1 || extraSources[0].id !== "answer" || extraSources[0].text !== binding.text ||
-        slotFacts.length !== 1 || slotFacts[0].source_id !== "question" || slotFacts[0].owner !== slot.owner || !same(slotFacts[0].span, slot.span) || slotFacts[0].text !== slot.text || !same(slotFacts[0].value, slot) ||
+        slotFacts.length !== 1 + (slot.declarations?.length ?? 0) || slotFacts[0].source_id !== "question" || slotFacts[0].owner !== slot.owner || !same(slotFacts[0].span, slot.span) || slotFacts[0].text !== slot.text || !same(slotFacts[0].value, slot) ||
+        (slot.declarations ?? []).some((declaration,index) => !slotFacts.some(fact => fact.source_id === "question" && fact.owner === slot.owner && same(fact.span,declaration.span) && fact.text === declaration.text && same(fact.value,{slot_id:slot.id,declaration:index}))) ||
         answerFacts.length !== 1 || answerFacts[0].role !== "filter" || answerFacts[0].owner !== slot.owner || !same(answerFacts[0].span, binding.span) || answerFacts[0].text !== binding.text || !same(answerFacts[0].value, binding.filter) ||
         !request.conditions.some(condition => condition.evidence_id === answerFacts[0].id && same(condition.filter, binding.filter)) ||
         request.date_expression !== binding.date_expression || slot.kind === "budget_criterion" && selection.currency !== binding.currency)

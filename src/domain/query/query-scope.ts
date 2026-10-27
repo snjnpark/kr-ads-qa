@@ -121,6 +121,9 @@ export function queryScopeEvidence(text: string, contextEntity?: string) {
     if (carrier) relationCharacters.fill(" ", end, end + carrier[0].length);
   }
   const relationText = relationCharacters.join("");
+  // Scope bridges may be skipped, but protected name text must never introduce a reference.
+  const referenceMatches = (pattern: RegExp) => [...relationText.matchAll(pattern)].filter(match =>
+    clean.slice(match.index, match.index + match[0].length) === text.slice(match.index, match.index + match[0].length));
   const entityMentions: (ScopeSpan & { entity: QueryPlan["entity"] })[] = [];
   for (const [entity, pattern] of entityPatterns) for (const match of objectText.matchAll(new RegExp(pattern, "giu"))) {
     const end = match.index! + match[0].length, exclusion = excluded.exec(objectText.slice(end));
@@ -153,11 +156,11 @@ export function queryScopeEvidence(text: string, contextEntity?: string) {
   const freshSearchSpans: [number, number][] = [];
   const newSearchDeclarations = [...clean.matchAll(/(?<![\p{L}\p{N}_])(?:새(?:로운)?\s*(?:검색|조회)(?:으로|로))(?=$|[\s,.;?!])/gu)];
   freshSearchSpans.push(...newSearchDeclarations.map(match => [match.index, match.index + match[0].length] as [number, number]));
-  for (const match of clean.matchAll(freshSearchReference)) {
+  for (const match of referenceMatches(freshSearchReference)) {
     const reset = freshSearchRole.exec(clean.slice(match.index + match[0].length));
     if (reset) freshSearchSpans.push([match.index, match.index + match[0].length + reset[0].length]);
   }
-  const referenceMentions = [...clean.matchAll(referencePattern)]
+  const referenceMentions = referenceMatches(referencePattern)
     .filter(match => !freshSearchSpans.some(([start, end]) => start <= match.index && end >= match.index + match[0].length));
   const temporalReference = referenceMentions.some(match => new RegExp(`^${priorTime}`, "u").test(match[0]));
   // A list introduced by this question's own object and condition is a local referent.
@@ -185,10 +188,9 @@ export function queryScopeEvidence(text: string, contextEntity?: string) {
   const reference = references.length ? (childSpans.length ? "children" as const : "previous" as const) : undefined;
   const referenceClaims = references.map(match => {
     const end = match.index + match[0].length;
-    if (!new RegExp(`^${priorTime}`, "u").test(match[0])) return { span: [match.index, end] as [number, number] };
     const inside = matches.find(mention => mention.start >= match.index && mention.end <= end);
     const following = matches.find(mention => mention.start >= end);
-    const owner = inside ?? (following && !relationText.slice(end, following.start).trim() ? following : undefined);
+    const owner = inside ?? (new RegExp(`^${priorTime}`, "u").test(match[0]) && following && !relationText.slice(end, following.start).trim() ? following : undefined);
     return { span: [match.index, owner ? Math.max(end, owner.end) : end] as [number, number], ...(owner ? { entity: owner.entity } : {}) };
   });
   const claimedEntities = [...new Set(referenceClaims.flatMap(claim => claim.entity ? [claim.entity] : []))];

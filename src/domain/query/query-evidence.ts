@@ -1,7 +1,7 @@
 import type { QueryPlan } from "./query-model";
 import { queryScopeText, missingNameOperand, stripAdProductMentions } from "../../lib/ad-products";
 import { ACTIVE, INACTIVE } from "./query";
-import { composedComparisonForms, quantifiedLogicForms, requestPhraseLength, settingPrefixLength, settingPresenceForms, workflowPhraseLength } from "./query-language";
+import { composedComparisonForms, quantifiedLogicForms, requestPhraseLength, settingPrefixLength, settingPresenceForms, workflowBackgroundPattern, workflowPhraseLength } from "./query-language";
 
 type FieldId = "daily" | "lifetime" | "status" | "end" | "name" | "created" | "id";
 type Literals = { amounts: string[]; quotedStrings: string[]; dates?: unknown[] };
@@ -15,6 +15,7 @@ type EvidenceOptions = {
   literalsFor?: (clause: string) => { amounts: string[] };
   requestRemainder?: (text: string) => string;
   literalFacts?: GroundedQueryFilter[];
+  ownedSpans?: {span: [number, number]; text: string}[];
   semantic?: QueryPlan["semantic"];
   operation?: QueryPlan["operation"];
 };
@@ -152,7 +153,8 @@ const carrierParts = [
   new RegExp(`^(?:받아\\s*(?:보고(?:\\s*싶(?:습니다|어요|어))?|볼(?:게요?)?)|쭉|아직|알아야\\s*합니다|필요합니다|원합니다|원해요|실행|상품|다시\\s*시작할래요)${boundary}`, "u"),
   new RegExp(`^(?:자세히|우선|혹시)${boundary}`, "u"),
   new RegExp(`^(?:조건\\s*경계까지\\s*확인해서|지\\s*확인할\\s*검수\\s*규칙을)${boundary}`, "u"),
-  new RegExp(`^(?:점검표를\\s*작성합니다|경우만\\s*따로|예산\\s*검토입니다|(?:을\\s*)?금액으로\\s*대조합니다|목록에서|대상의\\s*목록을\\s*받겠습니다|전체에서|항목은\\s*합쳐서|점검에서|항목으로\\s*조회\\s*대상을\\s*한정합니다|간에\\s*설정이\\s*어떻게\\s*다른지|전반의\\s*설정을|설정의\\s*과거\\s*변경\\s*이력을\\s*요청합니다|이면서)${boundary}`, "u"),
+  new RegExp(`^${workflowBackgroundPattern}`, "u"),
+  new RegExp(`^(?:경우만\\s*따로|예산\\s*검토입니다|(?:을\\s*)?금액으로\\s*대조합니다|목록에서|대상의\\s*목록을\\s*받겠습니다|전체에서|항목은\\s*합쳐서|항목으로\\s*조회\\s*대상을\\s*한정합니다|간에\\s*설정이\\s*어떻게\\s*다른지|전반의\\s*설정을|설정의\\s*과거\\s*변경\\s*이력을\\s*요청합니다|이면서)${boundary}`, "u"),
   new RegExp(`^(?:(?:기재해|나열|선별|표시)\\s*바랍니다|기재해\\s*주세요)${boundary}`, "u"),
   new RegExp(`^오늘\\s*(?:보여|알려|조회|확인)${requestEnding}${boundary}`, "u"),
   new RegExp(`^(?:(?:으로|로)\\s*)?범위를\\s*한정${requestEnding}${boundary}`, "u"),
@@ -314,6 +316,7 @@ function hasUnrepresentedCondition(residual: string, unboundMarkers: string[], p
 
 export function analyzeQueryEvidence(text: string, literals: Literals, options: EvidenceOptions = {}) {
   const literalCharacters = text.split("");
+  for (const item of options.ownedSpans ?? []) literalCharacters.fill(" ", item.span[0], item.span[1]);
   for (const fact of options.literalFacts ?? []) literalCharacters.fill(" ", fact.span[0], fact.span[1]);
   const literalView = literalCharacters.join("");
   // Workflow topics own only their field nouns; independent predicates remain obligations.
@@ -528,6 +531,7 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
   if (filters.filter(fact => fact.field_id === "name").length > 1) ambiguities.push("name:multiple_predicates");
   filters.sort((left, right) => left.span[0] - right.span[0]);
   let remainder = text;
+  for (const item of options.ownedSpans ?? []) remainder = remainder.slice(0, item.span[0]) + " ".repeat(item.span[1] - item.span[0]) + remainder.slice(item.span[1]);
   const proofUnits = [...new Map(filters.map(item => [item.span.join(":"), item])).values()];
   for (const item of [...proofUnits].sort((left, right) => right.span[0] - left.span[0])) remainder = remainder.slice(0, item.span[0]) + " ".repeat(item.span[1] - item.span[0]) + remainder.slice(item.span[1]);
   for (const [start, end] of displayed) remainder = remainder.slice(0, start) + " ".repeat(end - start) + remainder.slice(end);
@@ -565,8 +569,13 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
   if (filters.length > 1 && /[()（）]/u.test(mask(residual))) ambiguities.push("nested_logic");
   const logical_operator = ambiguities.some(item => item === "mixed_logic" || item === "nested_logic") ? undefined : hasOr ? "OR" as const : "AND" as const;
   const remaining = carrierResidual(residual, options.semantic, options.operation);
+  const background_carriers = [...queryScopeText(residual).matchAll(new RegExp(`(?<![^\\s,.;?!·:：])${workflowBackgroundPattern}`, "gu"))].map(found => ({
+    span: [found.index, found.index + found[0].length] as [number, number], text: text.slice(found.index, found.index + found[0].length), reason: "workflow_background" as const,
+  }));
+  const workflowCharacters = queryScopeText(residual).split("");
+  for (const item of background_carriers) workflowCharacters.fill(" ", ...item.span);
   // A carrier may recognize a workflow word but cannot authorize a different/default operation.
-  if (!options.operation && /검수|점검|검사|비교|정책|가이드|이력|규칙|룰|\bQA\b/iu.test(queryScopeText(residual)))
+  if (!options.operation && /검수|점검|검사|비교|정책|가이드|이력|규칙|룰|\bQA\b/iu.test(workflowCharacters.join("")))
     ambiguities.push("unowned_workflow");
   if (remaining) {
     unresolved.push(`residual:${remaining}`);
@@ -574,5 +583,5 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
       .map(anchor => anchor.field_id === "name" ? anchor.marker.match(/이름|명칭|그룹명|세트명|명$/u)![0] : anchor.marker);
     if (hasUnrepresentedCondition(residual, unboundMarkers, { count: filters.length, logic: logical_operator }, options.semantic)) ambiguities.push("unrepresented_condition");
   }
-  return { filters, relevant_fields, logical_operator, complete: !unresolved.length && !ambiguities.length, unresolved, ambiguities, residual, logic_evidence };
+  return { filters, relevant_fields, logical_operator, complete: !unresolved.length && !ambiguities.length, unresolved, ambiguities, residual, logic_evidence, background_carriers };
 }

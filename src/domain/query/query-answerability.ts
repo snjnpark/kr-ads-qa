@@ -35,12 +35,13 @@ const workflowHeads: [Operation, RegExp][] = [
 const countRequest = /개수|수량|몇\s*(?:개|건)|(?:캠페인|광고(?:\s*(?:그룹|세트))?|애셋\s*그룹|에셋\s*그룹|소재|키워드|항목|대상|것)(?:들)?\s*(?:의\s*)?(?:총\s*)?수(?:를|는|가|부터|만|도|\s|[?.!]|$)|(?:수를|수는)\s*(?:세|알|확인|얼마)|(?<![\p{L}\p{N}_])(?:세어|세(?=\s*(?:줘|주세요|주십시오|주실래|줄래)))(?=$|\s|줘|주세요|주십시오|주실래|줄래)/u;
 
 /** Request obligations are read before inference and checked again against the final plan. */
-export function analyzeQueryAnswerability(text: string, evidence?: Evidence, context?: QueryContext): QueryAnswerability {
+export function analyzeQueryAnswerability(text: string, evidence?: Evidence, context?: QueryContext, scope?: {reference?: "previous" | "children"}): QueryAnswerability {
   const clean = queryScopeText(text), metrics = performanceMetricText(text);
   const reasons: Reason[] = [];
   const add = (code: string, message: string, kind: Reason["kind"], capability?: Reason["capability"]) => reasons.push({ code, message, kind, ...(capability ? { capability } : {}) });
   let reference: "previous" | "children" | undefined;
-  try { reference = queryLiteralScope(text, context?.has_results ? context.entity : undefined).reference; } catch { /* The caller reports incompatible scope using the same grammar. */ }
+  if (scope) reference = scope.reference;
+  else try { reference = queryLiteralScope(text, context?.has_results ? context.entity : undefined).reference; } catch { /* The caller reports incompatible scope using the same grammar. */ }
   if (reference && !context?.has_results) add("context_required", "먼저 광고를 검색한 뒤 결과를 좁혀 주세요.", "clarification");
   const workflowText = clean.replace(/비교(?=하면|할\s*때|\s*기준)|(?:검수|점검|검사)(?=에서|용|\s*기준)/gu, value => " ".repeat(value.length))
     .replace(/[^.;?!]*(?:검수|점검|검사)[^.;?!]*(?:끝났|완료됐|완료했)[^.;?!]*[.;?!]/gu, value => " ".repeat(value.length))

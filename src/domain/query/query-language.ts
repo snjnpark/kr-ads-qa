@@ -78,6 +78,8 @@ const operationTopic: Record<string, RegExp> = {
   policy: /^(?:에\s*)?(?:대한\s*)?(?:(?:적용하고\s*있는|적용된)\s*)?(?:운영\s*)?정책(?:을|의)?\s*(?:위반한\s*항목|위반\s*목록|내용)(?:을|를)?(?=$|\s)/u,
   history: /^설정(?:에서|의)?\s*변경된\s*내용의\s*이력(?:을|를)?(?=$|\s)/u,
 };
+// Existing closed background/output units carry no independent inspection request.
+export const workflowBackgroundPattern = "(?:점검표를\\s*작성합니다|점검에서)(?=$|[\\s,.;?!·:：])";
 export function workflowPhraseLength(text: string, operation?: string): number {
   if (!operation) return 0;
   return Math.max(operationPatterns[operation]?.exec(text)?.[0].length ?? 0, operationTopic[operation]?.exec(text)?.[0].length ?? 0,

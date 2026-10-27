@@ -7,7 +7,7 @@ import { analyzeQueryAnswerability, withQueryEvidence, type QueryAnswerability }
 import type { QueryPlan, QueryTrace } from "./query-model";
 import { fieldPaths } from "./query-contract";
 import { projectPreparedRequest, snapshotQueryInput, type QueryInput, type RequestSpec } from "./query-request";
-import { bindSlotAnswer, type RequestContinuation, type RequestSlotProof } from "./query-clarification";
+import { bindSlotAnswer, readSlotDeclarations, type MissingSlot, type RequestContinuation, type RequestSlotProof } from "./query-clarification";
 
 const MONEY_UNITS: Record<string, number> = { 억: 100000000, 만: 10000, 천: 1000, 백: 100, 십: 10 };
 const DATE_LITERAL = /\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일|그제|어제|오늘|금일|지난\s?주|이번\s?주|이번\s?달|지난\s?달/gu;
@@ -118,7 +118,7 @@ const idOperands = (text: string) => idFacts(text).map(fact => fact.value);
 const positiveCreation = (text: string) => /생성(?=$|\s|한|된|됐|되었|됨|했|일)|생성\s*날짜|만든|만들어진|만들어졌|등록(?=$|\s|한|된|했|일)|만들어\s*둔/u.test(queryScopeText(text));
 
 // Literal facts carry their own source spans into the same completeness check as other slots.
-function queryEvidence(text: string, numeric: ReturnType<typeof queryLiterals>, now: Date, timezone: string, request: QueryAnswerability, contextEntity?: string, proof?: RequestSlotProof) {
+function queryEvidence(text: string, numeric: ReturnType<typeof queryLiterals>, now: Date, timezone: string, request: QueryAnswerability, contextEntity?: string, proof?: RequestSlotProof, declarations?: MissingSlot["declarations"]) {
   const literalFacts: GroundedQueryFilter[] = proof ? [{
     field_id: proof.slot.kind === "budget_criterion" ? proof.slot.field === "budget.daily" ? "daily" : "lifetime" : proof.slot.kind === "name_value" ? "name" : "created",
     filter: structuredClone(proof.binding.filter), span: [...proof.slot.span], text: proof.slot.text,
@@ -143,7 +143,7 @@ function queryEvidence(text: string, numeric: ReturnType<typeof queryLiterals>, 
   }
   return analyzeQueryEvidence(text, numeric, {
     literalsFor: clause => queryLiterals(clause, now, timezone), requestRemainder: clause => queryRequestEvidence(clause, contextEntity).residual, literalFacts,
-    semantic: request.semantic, operation: request.operation,
+    semantic: request.semantic, operation: request.operation, ownedSpans: declarations,
   });
 }
 function evidenceClarification(evidence: ReturnType<typeof queryEvidence>): string | undefined {
@@ -196,6 +196,11 @@ function attachBinding(spec: RequestSpec, proof: RequestSlotProof) {
   spec.continuation = structuredClone(proof);
   spec.evidence.push({ id: "slot:binding", source_id: "question", role: "slot", owner: slot.owner, span: [...slot.span], text: slot.text, value: structuredClone(slot) });
   spec.obligations.push({ id: "slot:binding", kind: "slot", owner: slot.owner, evidence_ids: ["slot:binding"], basis: "explicit" });
+  for (const [index, declaration] of (slot.declarations ?? []).entries()) {
+    const id = `slot:declaration:${index}`;
+    spec.evidence.push({id, source_id:"question", role:"slot", owner:slot.owner, ...structuredClone(declaration), value:{slot_id:slot.id, declaration:index}});
+    spec.obligations.push({id, kind:"slot", owner:slot.owner, evidence_ids:[id], basis:"explicit"});
+  }
   if (binding.date_expression) spec.date_expression = binding.date_expression;
   if (slot.kind === "budget_criterion" && spec.selection) spec.selection.currency = binding.currency;
 }
@@ -249,10 +254,15 @@ function readPreparedQuery(text: string, context: QueryContext | undefined, now:
   // Enforce the existing read-only configuration boundary before model interpretation; quoted names stay literal.
   const unquoted = queryScopeText(text);
   const proof = continued?.proof;
+  const declarations = proof ? proof.slot.declarations : readSlotDeclarations(text);
   // Only the verified missing phrase is absent from this lexical guard view. The request and evidence retain the original text.
-  const guardText = proof ? text.slice(0, proof.slot.span[0]) + " ".repeat(proof.slot.span[1] - proof.slot.span[0]) + text.slice(proof.slot.span[1]) : text;
-  const guardClean = proof ? queryScopeText(guardText) : unquoted;
-  const initialRequest = analyzeQueryAnswerability(guardText, undefined, context);
+  let guardText = text;
+  for (const {span:[start,end]} of [...(declarations ?? []), ...(proof ? [proof.slot] : [])]) guardText = guardText.slice(0,start) + " ".repeat(end-start) + guardText.slice(end);
+  const guardClean = queryScopeText(guardText);
+  let scopeEvidence: ReturnType<typeof queryScopeEvidence> | undefined, scopeError: Clarification | undefined;
+  try { scopeEvidence = queryScopeEvidence(text, context?.has_results ? context.entity : undefined); }
+  catch (error) { if (!(error instanceof Clarification)) throw error; scopeError = error; }
+  const initialRequest = analyzeQueryAnswerability(guardText, undefined, context, {reference:scopeEvidence?.scope.reference});
   trace.answerability = initialRequest;
   if (initialRequest.status === "unsupported") {
     const reason = initialRequest.reasons.find(item => item.kind === initialRequest.status)!;
@@ -260,7 +270,7 @@ function readPreparedQuery(text: string, context: QueryContext | undefined, now:
     trace.capability_guard = reason.capability;
     throw new Clarification(reason.message);
   }
-  const scopeEvidence = queryScopeEvidence(text, context?.has_results ? context.entity : undefined);
+  if (!scopeEvidence) throw scopeError!;
   const literalScope = scopeEvidence.scope;
   trace.literal_scope = literalScope;
   capture(scopeEvidence);
@@ -276,7 +286,7 @@ function readPreparedQuery(text: string, context: QueryContext | undefined, now:
   assertLiteralPredicates(guardText);
   if (numeric.dates.length && /등록(?:하지|되지)\s*않|등록\s*안/u.test(guardClean))
     throw new Clarification("등록 날짜는 긍정 표현의 날짜 또는 기간으로 지정해 주세요.");
-  const typed = queryEvidence(text, numeric, now, timezone, initialRequest, context?.has_results ? context.entity : undefined, proof);
+  const typed = queryEvidence(text, numeric, now, timezone, initialRequest, context?.has_results ? context.entity : undefined, proof, declarations);
   trace.evidence = typed;
   const request = withQueryEvidence(initialRequest, typed);
   trace.answerability = request;
@@ -371,7 +381,7 @@ export function prepareRequest(text: string, context: QueryContext | undefined, 
     const literalScope: PreparedQuery["literalScope"] = trace.literal_scope ?? { platforms: [] };
     const request: QueryAnswerability = trace.answerability ?? { status: "clarification", reasons: [], operations: [], data_requirements: [] };
     const typed: ReturnType<typeof queryEvidence> = trace.evidence ?? { filters: [], relevant_fields: [], logical_operator: undefined, complete: false,
-      unresolved: [], ambiguities: [], residual: text, logic_evidence: [] };
+      unresolved: [], ambiguities: [], residual: text, logic_evidence: [], background_carriers: [] };
     const spec = projectPreparedRequest(continued?.input ?? snapshotQueryInput(text, context, now, timezone), {
       typed, request, literalScope, scopeEntity: literalScope.entity, products: [], modelFields: [],
       clauses: scopeEvidence?.clauses ?? [], scope_roles: scopeEvidence?.roles,

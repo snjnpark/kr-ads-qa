@@ -29,6 +29,7 @@ export const precedingQuotedName = /(?:"[^"]+"|'[^']+'|“[^”]+”|‘[^’]+�
 export const queryIntroduction = /^\s*(?:인수인계(?:를)?\s*받는\s*담당자(?:야|입니다)[.!?]?|검수\s*담당자(?:라|인데)|보고서에\s*쓸|다음\s*담당자에게\s*줄|담당\s*캠페인을\s*점검하려고요[.!?])(?=\s|$)/u;
 /** A leading name predicate has no operand to protect; quoted values remain literals. */
 export function missingNameOperand(text: string): boolean {
+  if (/^(?:특정|어떤)\s*(?:단어|문구|문자열)(?:가|이|와|과)?\s*(?:(?:정확히|정확하게)\s*)?(?:포함|들어|제외|같은|일치|동일)/u.test(text.trimStart())) return true;
   return /^(?:(?:(?:정확히|정확하게|완전히|딱)\s*)?(?:같은|동일한|일치하는)|(?:안\s*)?포함(?:된|한|하는|되는|되어(?:\s*있는)?|(?:되지|하지)\s*않(?:은|는)|\s*안\s*(?:된|한))?|미포함(?:된|한|인)?|(?:안\s*)?들어(?:가)?\s*(?:있는|간|가는)|들어(?:가|있)?지\s*않(?:은|는)|제외(?:된|한|하는)?|빠진|없는|있는)(?=$|[\s,.;?!])/u.test(text.trimStart());
 }
 export function queryScopeText(text: string): string {

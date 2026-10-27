@@ -17,6 +17,7 @@ export type MissingSlot = {
   operator?: Filter["operator"];
   currency: QueryPlan["currency"];
   prompt: string;
+  declarations?: {span: [number, number]; text: string}[];
 };
 export type SlotBinding = {
   slot_id: string;
@@ -30,8 +31,8 @@ export type SlotBinding = {
 export type RequestSlotProof = { slot: MissingSlot; binding: SlotBinding };
 export type RequestContinuation = { request: RequestSpec; slot: MissingSlot; answer: string };
 type Hole = Pick<MissingSlot, "kind" | "field" | "span" | "operator">;
-const budgetHole = /(일\s*예\s*산|하루\s*예\s*산|일일\s*예\s*산|총\s*예\s*산|전체\s*예\s*산)(?:이|가|은|는)?\s*(?:(?:원화|달러|KRW|USD)\s*(?:기준(?:으로)?\s*)?)?(?:(기준(?:\s*금액)?(?:보다)?|얼마)\s*)?(이상(?:인)?|이하(?:인)?|초과(?:인|하는)?|미만(?:인)?|높은|낮은|큰|작은|적은|많은|적당한|충분한|애매한|적정한|대략적인)(?=$|[\s,.;?!])/giu;
-const nameHole = /(?:이름|명칭)(?:에|에서|이|가|은|는)?\s*(?:(?:특정|어떤)\s*(?:단어|문구|문자열)(?:가|이)?\s*)?((?:정확히\s*)?(?:같은|일치하는|동일한)|포함(?:된|한|하는)|들어\s*(?:있는|간)|포함(?:되지|하지)\s*않(?:은|는)|제외(?:된|한))(?=$|[\s,.;?!])/gu;
+const budgetHole = /(일\s*예\s*산|하루\s*예\s*산|일일\s*예\s*산|총\s*예\s*산|전체\s*예\s*산)(?:이|가|은|는)?\s*(?:(?:원화|달러|KRW|USD)\s*(?:기준(?:으로)?\s*)?)?(?:(기준(?:\s*금액)?(?:보다)?|얼마)\s*)?(이상(?:인)?|이하(?:인)?|초과(?:인|하는)?|미만(?:인)?|높은|낮은|큰|작은|적은|많은|적당한|충분한|애매한|적정한|대략적인)(?:지\s*(?:기준\s*)?금액(?:을|은)?\s*(?:아직\s*)?정하지\s*않았(?:어|습니다))?(?=$|[\s,.;?!])/giu;
+const nameHole = /(?:이름|명칭)(?:에|에서|이|가|은|는)?\s*(?:(?:특정|어떤)\s*(?:단어|문구|문자열)(?:가|이|와|과)?\s*)?((?:정확히\s*)?(?:같은|일치하는|동일한)|포함(?:된|한|하는)|들어\s*(?:있는|간)|포함(?:되지|하지)\s*않(?:은|는)|제외(?:된|한))(?=$|[\s,.;?!])/gu;
 const creationHoles = [
   /(?:얼마\s*전|최근|근래|요즘|조금\s*전|며칠\s*전)(?:에|의)?\s*(?:새로\s*)?(?:생성(?:된|한|됐|되었)|등록(?:된|한|했)|만든|만들어진)(?=$|[\s,.;?!])/gu,
   /(?:생성(?:일|\s*날짜)|등록일)(?:이|가|은|는)?\s*(?:얼마\s*전|최근|근래|요즘|며칠\s*전)(?:인)?(?=$|[\s,.;?!])/gu,
@@ -40,7 +41,20 @@ const budgetOperators: Record<string, Filter["operator"]> = { 이상: "gte", 이
 const answerOperators: Record<string, Filter["operator"]> = { ...budgetOperators, 같음: "eq", 같은: "eq", 같다: "eq", 동일: "eq" };
 const allowedMissingReasons = new Set(["missing_budget_criterion", "missing_name_operand", "missing_creation_period"]);
 
-function readSlotSource(input: QueryInput): MissingSlot | null {
+function slotDeclarations(text: string, hole: Hole): NonNullable<MissingSlot["declarations"]> {
+  const subject = hole.kind === "budget_criterion" ? "(?:기준\\s*)?금액|예산\\s*기준" : hole.kind === "name_value" ? "(?:이름\\s*값|문구|문자열|단어)" : "(?:생성|등록)\\s*(?:기간|날짜)|기간";
+  const value = `(?:(?:어떤\\s*)?(?:${subject})|(?:필요한\\s*값|값|조건|확인할\\s*기준))`;
+  const time = "(?:이어서|다음에|나중에|추가로)";
+  const act = "(?:알려\\s*(?:줄게|드릴게|주겠습니다)|보충(?:할게|하겠습니다)|확정(?:할게|하겠습니다))";
+  const clause = `(?:(?:${time}\\s*)?${value}(?:인지는|은|는|을|를|이|가)?\\s*(?:${time}\\s*)?${act}|${value}(?:은|는)\\s*다음\\s*답에\\s*있어|아직\\s*${value}(?:이|가)\\s*완성되지\\s*않았어|(?:먼저\\s*)?확인\\s*질문(?:을)?\\s*(?:해\\s*줘|해주세요))`;
+  // A declaration must occupy an entire clause; unknown words and other predicates are never hidden.
+  const pattern = new RegExp(`(?<![^.;?!\\n])\\s*${clause}(?=$|[.;?!\\n])`, "gu");
+  const clean = unquotedAdText(text);
+  return [...clean.matchAll(pattern)].filter(match => text.slice(match.index, match.index + match[0].length) === match[0])
+    .map(match => ({span: [match.index, match.index + match[0].length] as [number, number], text: text.slice(match.index, match.index + match[0].length)}));
+}
+
+export function readSlotSource(input: QueryInput): MissingSlot | null {
   const text = input.text;
   if (!text.trim() || text.length > 2000) return null;
   const previous = input.previous;
@@ -48,19 +62,8 @@ function readSlotSource(input: QueryInput): MissingSlot | null {
   const disposition = analyzeQueryAnswerability(text, undefined, context);
   if (disposition.reasons.some(reason => !allowedMissingReasons.has(reason.code))) return null;
   if (disposition.operation && ["audit", "policy", "history"].includes(disposition.operation)) return null;
-  const clean = queryScopeText(text), holes: Hole[] = [];
-  for (const match of clean.matchAll(budgetHole)) {
-    const explicit = Object.entries(budgetOperators).find(([prefix]) => match[3].startsWith(prefix))?.[1];
-    const compared = match[2]?.endsWith("보다") ? /^(?:높은|큰|많은)$/u.test(match[3]) ? "gt" : /^(?:낮은|작은|적은)$/u.test(match[3]) ? "lt" : undefined : undefined;
-    holes.push({ kind: "budget_criterion", field: /총|전체/u.test(match[1]) ? "budget.lifetime" : "budget.daily", span: [match.index, match.index + match[0].length], operator: explicit ?? compared });
-  }
-  for (const match of unquotedAdText(text).matchAll(nameHole)) holes.push({ kind: "name_value", field: "name", span: [match.index, match.index + match[0].length],
-    operator: /않|제외/u.test(match[1]) ? "not_contains" : /같은|일치|동일/u.test(match[1]) ? "eq" : "contains" });
-  for (const pattern of creationHoles) for (const match of clean.matchAll(pattern))
-    holes.push({ kind: "creation_period", field: "created_at", span: [match.index, match.index + match[0].length], operator: "between" });
-  if (holes.length !== 1) return null;
-  const hole = holes[0];
-  if (/^\s*(?:(?:것(?:이|은)|게|건)\s*)?(?:아닌|아니|않|말고|제외)/u.test(clean.slice(hole.span[1]))) return null;
+  const clean = queryScopeText(text), hole = readHole(text);
+  if (!hole) return null;
   let scope: ReturnType<typeof queryScopeEvidence>;
   let currency: QueryPlan["currency"];
   try {
@@ -74,9 +77,34 @@ function readSlotSource(input: QueryInput): MissingSlot | null {
   const previousEntity = ["campaign", "adgroup", "ad", "creative", "keyword", "asset_group"].includes(context.entity) ? context.entity as QueryPlan["entity"] : undefined;
   const owner = scope.scope.entity ?? (scope.scope.reference && previous.has_results ? scope.scope.reference === "children" ? childEntity(context.entity) : previousEntity : undefined);
   if (!owner) return null;
-  return { ...hole, id: `missing:${hole.field}:${hole.span.join(":")}`, owner, text: text.slice(...hole.span), currency,
+  const declarations = slotDeclarations(text, hole);
+  return { ...hole, id: `missing:${hole.field}:${hole.span.join(":")}`, owner, text: text.slice(...hole.span), currency, ...(declarations.length ? {declarations} : {}),
     prompt: hole.kind === "budget_criterion" ? hole.operator ? "비교할 예산 금액을 알려주세요." : "예산의 기준 금액과 비교 방향을 알려주세요. 예: 3만 원 이상."
       : hole.kind === "name_value" ? "이름에 적용할 문자열을 알려주세요. 공백이나 업무 단어가 있으면 따옴표로 감싸 주세요." : "생성 기간을 알려주세요. 예: 오늘, 지난주, 2026-10-20." };
+}
+
+function readHole(text: string): Hole | null {
+  const clean = queryScopeText(text), holes: Hole[] = [];
+  for (const match of clean.matchAll(budgetHole)) {
+    if (text.slice(match.index,match.index + match[0].length) !== match[0]) continue;
+    const explicit = Object.entries(budgetOperators).find(([prefix]) => match[3].startsWith(prefix))?.[1];
+    const compared = match[2]?.endsWith("보다") ? /^(?:높은|큰|많은)$/u.test(match[3]) ? "gt" : /^(?:낮은|작은|적은)$/u.test(match[3]) ? "lt" : undefined : undefined;
+    holes.push({ kind: "budget_criterion", field: /총|전체/u.test(match[1]) ? "budget.lifetime" : "budget.daily", span: [match.index, match.index + match[0].length], operator: explicit ?? compared });
+  }
+  for (const match of unquotedAdText(text).matchAll(nameHole)) if (text.slice(match.index,match.index + match[0].length) === match[0])
+    holes.push({ kind: "name_value", field: "name", span: [match.index, match.index + match[0].length], operator: /않|제외/u.test(match[1]) ? "not_contains" : /같은|일치|동일/u.test(match[1]) ? "eq" : "contains" });
+  for (const pattern of creationHoles) for (const match of clean.matchAll(pattern)) if (text.slice(match.index,match.index + match[0].length) === match[0])
+    holes.push({ kind: "creation_period", field: "created_at", span: [match.index, match.index + match[0].length], operator: "between" });
+  if (holes.length !== 1) return null;
+  const hole = holes[0];
+  if (/^\s*(?:(?:것(?:이|은)|게|건)\s*)?(?:아닌|아니|않|말고|제외)/u.test(clean.slice(hole.span[1]))) return null;
+  return hole;
+}
+
+/** Lexical ownership only; preparation keeps the canonical workflow and scope readers. */
+export function readSlotDeclarations(text: string): NonNullable<MissingSlot["declarations"]> {
+  const hole = readHole(text);
+  return hole ? slotDeclarations(text, hole) : [];
 }
 
 /** A hole owns one closed source phrase. It never consumes another condition or operation. */
