@@ -1,7 +1,7 @@
 import { excludedAdProduct, missingNameOperand, performanceMetricText, precedingQuotedName, queryScopeText } from "../../lib/ad-products";
 import type { QueryContext } from "./query";
 import type { QueryPlan } from "./query-model";
-import { queryLiteralScope, queryRequestRemainder } from "./query-scope";
+import { queryClosedHierarchyRoles, queryLiteralScope, queryRequestRemainder } from "./query-scope";
 import { explicitReadRequest } from "./query-language";
 
 type Operation = QueryPlan["operation"];
@@ -107,7 +107,9 @@ export function analyzeQueryAnswerability(text: string, evidence?: Evidence, con
     add("mutating_action", "광고 설정을 바꾸는 작업은 지원하지 않습니다. 현재 설정 조회와 검수만 가능합니다.", "unsupported", "read_only");
   if (!operations.includes("create_rule") && /(?:광고|캠페인|그룹|세트|소재|키워드)[^.;?!]{0,40}(?:생성|추가|개설|만들어)(?:해)?\s*(?:주|줄|줘|달라)/u.test(clean))
     add("creating_entity", "새 광고 객체를 생성하는 작업은 지원하지 않습니다. 현재 설정 조회와 검수만 가능합니다.", "unsupported", "read_only");
-  if (/예산[^.;?!]*(?:높은\s*순|낮은\s*순|정렬|상위|하위|평균(?!적인)|중앙값|합계|총합|예측|추천|순위|환율|환산|사이|가장\s*(?:큰|높|적|낮)|어제보다\s*(?:늘|줄|많|적)|다른\s*(?:캠페인|광고\s*그룹|광고\s*세트|것)[^.;?!]*보다)|(?:평균|중앙값)[^.;?!]*예산|(?:일|하루)\s*예산[^.;?!]*(?:총|전체)\s*예산[^.;?!]*(?:차이|합|비율|보다)|총\s*예산[^.;?!]*일\s*예산[^.;?!]*보다|총\s*예산보다[^.;?!]*일\s*예산|일\s*예산보다[^.;?!]*총\s*예산|가장[^.;?!]*예산/u.test(clean))
+  const budgetCharacters = clean.split("");
+  for (const { span: [start, end] } of queryClosedHierarchyRoles(text)) budgetCharacters.fill(" ", start, end);
+  if (/예산[^.;?!]*(?:높은\s*순|낮은\s*순|정렬|상위|하위|평균(?!적인)|중앙값|합계|총합|예측|추천|순위|환율|환산|사이|가장\s*(?:큰|높|적|낮)|어제보다\s*(?:늘|줄|많|적)|다른\s*(?:캠페인|광고\s*그룹|광고\s*세트|것)[^.;?!]*보다)|(?:평균|중앙값)[^.;?!]*예산|(?:일|하루)\s*예산[^.;?!]*(?:총|전체)\s*예산[^.;?!]*(?:차이|합|비율|보다)|총\s*예산[^.;?!]*일\s*예산[^.;?!]*보다|총\s*예산보다[^.;?!]*일\s*예산|일\s*예산보다[^.;?!]*총\s*예산|가장[^.;?!]*예산/u.test(budgetCharacters.join("")))
     add("derived_budget", "예산의 정렬·순위·집계·환산·예측은 지원하지 않습니다. 하나의 기준 금액으로 비교해 주세요.", "unsupported", "unsupported_condition");
   if (/종료(?:일|\s*날짜)?(?:까지|후|된|했|한|됐)|종료(?:일|\s*날짜)[^.;?!]{0,24}(?:남[은았]|지[난났])|(?:어제|오늘|그제|지난\s*주)[^.;?!]{0,12}종료/u.test(clean) &&
       /남[은았]|지[난났]|종료(?:된|했|한|됐)|\d+\s*일|사흘|이틀|나흘|며칠/u.test(clean))

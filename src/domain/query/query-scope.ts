@@ -50,6 +50,14 @@ export function resolveQueryScope(request: { entity?: string; platforms: readonl
   return { ...selected, ...(platforms ? { platforms } : {}), ...(products ? { products } : {}) };
 }
 type ScopeSpan = { start: number; end: number; negative: boolean; exclusion_end: number; name_field?: boolean };
+function entityScopeMentions(objectText: string) {
+  const mentions: (ScopeSpan & { entity: QueryPlan["entity"] })[] = [];
+  for (const [entity, pattern] of entityPatterns) for (const match of objectText.matchAll(new RegExp(pattern, "giu"))) {
+    const end = match.index! + match[0].length, exclusion = excluded.exec(objectText.slice(end));
+    mentions.push({ entity, start: match.index!, end, negative: !!exclusion, exclusion_end: end + (exclusion?.[0].length ?? 0), name_field: /(?:명|이름|명칭)$/u.test(match[0]) });
+  }
+  return coordinatedAdExclusions(ownedAdSpans(mentions), objectText);
+}
 function scopeSpans(mentions: ScopeSpan[], text: string): [number, number][] {
   const spans: [number, number][] = mentions.filter(mention => !mention.name_field).map(mention => [mention.start, mention.exclusion_end]);
   for (let i = 1; i < mentions.length; i++) {
@@ -79,6 +87,19 @@ const freshSearchReference = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${priorTime}|기
 const selectedScopePattern = /(?<![\p{L}\p{N}_])(?:(?:현재|화면(?:에서|의)?)(?:\s*현재)?\s*)?선택(?:한|된)\s*(?:조회\s*)?범위(?:를|는)?\s*적용(?:하여|해서|해)(?=$|[\s,.;?!])/gu;
 
 export type QueryScopeRole = { kind: "entity" | "scope" | "reference" | "relation"; span: [number, number]; text: string; entity?: QueryPlan["entity"] };
+const hierarchy = /^\s*(?:들\s*)?(?:(?:(?:검색|조회)\s*)?(?:결과|목록|리스트)\s*)?(?:(?:의|에|에서)\s*)?(?:(?:하위|아래|밑)(?:의|에서|에)?(?:\s*(?:속한|있는|연결된|등록된))?|속한)\s*/u;
+
+/** Closed object relations stay distinct from budget ranking even when another scope obligation needs clarification. */
+export function queryClosedHierarchyRoles(text: string): QueryScopeRole[] {
+  const clean = queryScopeText(text), objectText = stripAdProductMentions(clean, adProductSpans(text));
+  const objects = entityScopeMentions(objectText).filter(mention => !mention.negative);
+  return objects.slice(1).flatMap((child, index) => {
+    const parent = objects[index], bridge = clean.slice(parent.end, child.start), relation = hierarchy.exec(bridge);
+    if (parent.name_field || child.name_field || !descendantType(parent.entity, child.entity) ||
+        !relation || relation[0].length !== bridge.length || /[.;?!\n]/u.test(bridge) || bridge !== text.slice(parent.end, child.start)) return [];
+    return [{ kind: "relation", span: [parent.end, child.start], text: text.slice(parent.end, child.start) }];
+  });
+}
 
 export function queryScopeEvidence(text: string, contextEntity?: string) {
   const clean = queryScopeText(text);
@@ -124,12 +145,7 @@ export function queryScopeEvidence(text: string, contextEntity?: string) {
   // Scope bridges may be skipped, but protected name text must never introduce a reference.
   const referenceMatches = (pattern: RegExp) => [...relationText.matchAll(pattern)].filter(match =>
     clean.slice(match.index, match.index + match[0].length) === text.slice(match.index, match.index + match[0].length));
-  const entityMentions: (ScopeSpan & { entity: QueryPlan["entity"] })[] = [];
-  for (const [entity, pattern] of entityPatterns) for (const match of objectText.matchAll(new RegExp(pattern, "giu"))) {
-    const end = match.index! + match[0].length, exclusion = excluded.exec(objectText.slice(end));
-    entityMentions.push({ entity, start: match.index!, end, negative: !!exclusion, exclusion_end: end + (exclusion?.[0].length ?? 0), name_field: /(?:명|이름|명칭)$/u.test(match[0]) });
-  }
-  const objects = coordinatedAdExclusions(ownedAdSpans(entityMentions), objectText);
+  const objects = entityScopeMentions(objectText);
   const matches = objects.filter(mention => !mention.negative);
   const entities = [...new Set(matches.map(m => m.entity))];
   const relationSpans: [number, number][] = [];
@@ -137,7 +153,6 @@ export function queryScopeEvidence(text: string, contextEntity?: string) {
     const descending = entities.every((e,i) => i === 0 || descendantType(entities[i-1], e));
     const bridges = matches.slice(1).map((mention, index) => ({ start: matches[index].end, end: mention.start,
       text: relationText.slice(matches[index].end, mention.start) }));
-    const hierarchy = /^\s*(?:들\s*)?(?:(?:(?:검색|조회)\s*)?(?:결과|목록|리스트)\s*)?(?:(?:의|에|에서)\s*)?(?:(?:하위|아래|밑)(?:의|에서|에)?(?:\s*(?:속한|있는|연결된|등록된))?|속한)\s*/u;
     if (matches.slice(0, -1).some(mention => mention.name_field) || bridges.some(bridge => {
       const condition = conditionMarker.exec(bridge.text);
       return condition && !hierarchy.test(bridge.text.slice(0, condition.index));
