@@ -15,6 +15,7 @@ export type QueryAnswerability = {
   operation?: Operation;
   semantic?: Semantic;
   data_requirements: string[];
+  operation_evidence?: { operation: Operation; span: [number, number]; text: string }[];
 };
 
 // These are the operations/data this query executor can actually represent, not connector-wide API capabilities.
@@ -28,7 +29,7 @@ const workflowHeads: [Operation, RegExp][] = [
   ["create_rule", /(?:규칙|룰)(?:안)?(?:을|를)?[^.;?!]{0,45}(?:제안|만들|생성|작성)|(?:제안|만들|생성|작성)[^.;?!]{0,30}(?:규칙|룰)|(?:규칙|룰)\s*(?:초안|안)?(?:을|를)?\s*(?:주세요|주십시오|요청|부탁)/u],
   ["history", /이력|변경[^.;?!]*(?:내역|기록)|설정이?\s*바뀐\s*(?:내역|기록)/u],
   ["policy", /정책|가이드/u],
-  ["audit", /검수|점검(?!표)|\bQA\b|(?:전체\s*)?설정(?:값)?(?:을|의|에\s*대한)?\s*검사/iu],
+  ["audit", /검수|점검(?!표)|\bQA\b|(?:전체\s*)?설정(?:값)?(?:을|의|에\s*대한)?\s*(?:(?:전체|전부|모두)(?:을|를)?\s*)?검사|검사(?=해|하|를\s*(?:부탁|요청))/iu],
   ["compare", /비교|설정[^.;?!]*(?:차이|대조)|(?:간|사이)(?:의)?\s*차이(?:점)?/u],
 ];
 const countRequest = /개수|수량|몇\s*(?:개|건)|(?:캠페인|광고(?:\s*(?:그룹|세트))?|애셋\s*그룹|에셋\s*그룹|소재|키워드|항목|대상|것)(?:들)?\s*(?:의\s*)?(?:총\s*)?수(?:를|는|가|부터|만|도|\s|[?.!]|$)|(?:수를|수는)\s*(?:세|알|확인|얼마)|(?<![\p{L}\p{N}_])(?:세어|세(?=\s*(?:줘|주세요|주십시오|주실래|줄래)))(?=$|\s|줘|주세요|주십시오|주실래|줄래)/u;
@@ -41,16 +42,24 @@ export function analyzeQueryAnswerability(text: string, evidence?: Evidence, con
   let reference: "previous" | "children" | undefined;
   try { reference = queryLiteralScope(text, context?.has_results ? context.entity : undefined).reference; } catch { /* The caller reports incompatible scope using the same grammar. */ }
   if (reference && !context?.has_results) add("context_required", "먼저 광고를 검색한 뒤 결과를 좁혀 주세요.", "clarification");
-  const workflowText = clean.replace(/비교(?=하면|할\s*때|\s*기준)|(?:검수|점검)(?=에서|용|\s*기준)/gu, "  ")
-    .replace(/[^.;?!]*(?:검수|점검)[^.;?!]*(?:끝났|완료됐|완료했)[^.;?!]*[.;?!]/gu, " ")
+  const workflowText = clean.replace(/비교(?=하면|할\s*때|\s*기준)|(?:검수|점검|검사)(?=에서|용|\s*기준)/gu, value => " ".repeat(value.length))
+    .replace(/[^.;?!]*(?:검수|점검|검사)[^.;?!]*(?:끝났|완료됐|완료했)[^.;?!]*[.;?!]/gu, value => " ".repeat(value.length))
     // Consume the operation word only inside its own grammatical role; independent verbs remain visible.
-    .replace(/(?:검수|점검)(?=\s*정책)/gu, "  ")
-    .replace(/(?:검수|점검|검사|QA)(?=(?:하는|할|하도록|용)?\s*(?:새(?:로운)?\s*)?(?:규칙|룰))/giu, "  ")
+    .replace(/(?:검수|점검|검사)(?=\s*정책)/gu, value => " ".repeat(value.length))
+    .replace(/(?:검수|점검|검사|QA)(?=(?:하는|할|하도록|용)?\s*(?:새(?:로운)?\s*)?(?:규칙|룰))/giu, value => " ".repeat(value.length))
     .replace(/정책(?:을|를|에)?\s*(?:기준으로|따라|적용해)/gu, match => match.replace("정책", "  "))
     .replace(/정책(?:의)?\s*(?:(?:적용|배정|연결)\s*(?:상태|내용|여부|내역)(?:을|를|은|는)?|(?:을|를))\s*(?:검수|점검)/gu,
       match => match.replace(/검수|점검/gu, "  "));
-  const operations = workflowHeads.filter(([, pattern]) => pattern.test(workflowText)).map(([operation]) => operation);
-  if (countRequest.test(clean)) operations.push("count");
+  const operation_evidence = workflowHeads.flatMap(([operation, pattern]) => {
+    const found = pattern.exec(workflowText);
+    return found ? [{ operation, span: [found.index, found.index + found[0].length] as [number, number], text: text.slice(found.index, found.index + found[0].length) }] : [];
+  });
+  const operations = operation_evidence.map(item => item.operation);
+  const counted = countRequest.exec(clean);
+  if (counted) {
+    operations.push("count");
+    operation_evidence.push({ operation: "count", span: [counted.index, counted.index + counted[0].length], text: text.slice(counted.index, counted.index + counted[0].length) });
+  }
   const coordinatedList = /(?:보여|알려|찾아|조회해)(?:\s*주)?(?:고|준\s*(?:뒤|후)|준\s*다음)[^.;?!]*(?:검수|점검|이력|정책|비교|규칙|룰)/u;
   const followingList = /(?:비교|검수|점검|이력|정책)[^.;?!]*(?:한\s*(?:후|뒤|다음)|하고|해\s*주고)[^.;?!]*(?:(?:목록|리스트)(?:도|을|를)?\s*(?:보여|알려|조회)|찾아)/u;
   const countedList = /(?:목록|리스트)(?:과|와|하고|\s*및)\s*(?:개수|수량)|(?:개수|수량)(?:과|와|하고|\s*및)\s*(?:목록|리스트)|(?:보여|찾아|조회해)(?:\s*주)?고[^.;?!]*(?:개수|수량|세어|세줘)|(?:세고|센\s*(?:뒤|후)|세어\s*주고)[^.;?!]*(?:목록|리스트)(?:도|을|를)?\s*(?:보여|알려|조회)/u;
@@ -63,7 +72,7 @@ export function analyzeQueryAnswerability(text: string, evidence?: Evidence, con
   if (operations.length && (coordinatedList.test(clean) || followingList.test(clean) || countedList.test(clean) || independentList)) operations.push("find");
   const requested = [...new Set(operations)];
   if (requested.length > 1) add("multiple_operations", "목록·개수·비교·검수·정책·이력·규칙 작업을 하나씩 질문해 주세요.", "clarification");
-  if ([...clean.matchAll(/비교|검수|점검|이력|정책|규칙|룰/gu)].some(match =>
+  if ([...clean.matchAll(/비교|검수|점검|검사|이력|정책|규칙|룰/gu)].some(match =>
     /말고|제외|아닌|하지|않|없이|대신/u.test(clean.slice(match.index + match[0].length).split(/캠페인|광고\s*(?:그룹|세트)|일\s*예산|총\s*예산|종료일|이름|[.;]/u)[0])))
     add("excluded_workflow", "제외할 작업 대신 실행할 작업만 지정해 주세요.", "clarification");
 
@@ -137,7 +146,7 @@ export function analyzeQueryAnswerability(text: string, evidence?: Evidence, con
 
   const operation = requested.length === 1 ? requested[0] : undefined;
   if (operation && (QUERY_EXECUTION_CAPABILITIES.unfiltered_operations as readonly Operation[]).includes(operation)) {
-    if (evidence?.filters.length || reference)
+    if (evidence?.filters.length || reference || semantics.length)
       add("filtered_workflow", "조건으로 좁힌 대상이나 이전 결과의 검수·정책·이력은 해당 화면에서 범위를 선택해 실행해 주세요.", "clarification");
   }
   const unsupported = reasons.some(reason => reason.kind === "unsupported");
@@ -145,7 +154,16 @@ export function analyzeQueryAnswerability(text: string, evidence?: Evidence, con
     status: unsupported ? "unsupported" : reasons.length ? "clarification" : evidence?.complete ? "supported" : "model_needed",
     reasons, operations: requested, ...(operation ? { operation } : {}), ...(semantics.length === 1 ? { semantic: semantics[0] } : {}),
     data_requirements: operation === "history" ? ["connected_settings", "previous_snapshot"] : operation === "policy" || operation === "audit" ? ["connected_settings", "policy_scope"] : ["connected_settings", ...(semantics.length ? ["declared_intent", "actual_configuration"] : [])],
+    operation_evidence,
   };
+}
+
+/** Attach field obligations without reading the original request and its workflow a second time. */
+export function withQueryEvidence(request: QueryAnswerability, evidence: Evidence): QueryAnswerability {
+  const reasons = [...request.reasons];
+  if (request.operation && (QUERY_EXECUTION_CAPABILITIES.unfiltered_operations as readonly Operation[]).includes(request.operation) && (evidence.filters.length || request.semantic) && !reasons.some(reason => reason.code === "filtered_workflow"))
+    reasons.push({ code: "filtered_workflow", message: "조건으로 좁힌 대상이나 이전 결과의 검수·정책·이력은 해당 화면에서 범위를 선택해 실행해 주세요.", kind: "clarification" });
+  return { ...request, reasons, status: reasons.some(reason => reason.kind === "unsupported") ? "unsupported" : reasons.length ? "clarification" : evidence.complete ? "supported" : "model_needed" };
 }
 
 export function requestPlanMismatch(request: QueryAnswerability, plan: QueryPlan): string | undefined {

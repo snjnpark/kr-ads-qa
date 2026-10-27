@@ -43,13 +43,14 @@ export const composedComparisonForms: ["eq" | "ne" | "gt" | "gte" | "lt" | "lte"
 ];
 
 const targetAction = `(?:${readNoun}(?:할|하려는|하려던|하고\\s*싶은|하려고\\s*하는)?|찾(?:을|으려는)|(?:살펴)?볼|(?:보|살펴보)고\\s*싶은|(?:개수를\\s*)?셀)`;
-const targetKind = "(?:대상|항목)(?:\\s*종류)?|종류";
+const targetKind = "(?:(?:질문|요청)(?:의)?\\s*)?(?:대상|항목)(?:\\s*종류)?|종류";
 const targetLabel = `(?:(?:${targetKind})(?:(?:이라는\\s*말|이라고\\s*한\\s*것))?(?:은|는|을|:|：)|(?:조회|검색|확인|찾으려는)(?:할)?\\s*것(?:은|이))`;
-const targetHead = `(?:(?:이번(?:에(?:는)?)?|지금|현재|먼저)\\s*)?(?:(?:개수|수량)(?:를|을)\\s*)?(?:${targetAction}\\s*)?(?:목록의\\s*)?${targetLabel}\\s*|(?:(?:이번|현재)\\s*)?${readNoun}(?:은|는)\\s*`;
+const targetHead = `(?:(?:이번(?:에(?:는)?)?|지금|현재|먼저)\\s*)?(?:(?:개수|수량)(?:를|을)\\s*)?(?:${targetAction}\\s*)?(?:목록의\\s*)?${targetLabel}\\s*|(?:(?:이번|현재)\\s*)?(?:${readNoun}|질문|요청)(?:은|는)\\s*`;
 const identityEnding = "(?:뿐)?(?:이야|입니다|이에요|예요|이다|이고|이며|야)";
 const selectEnding = "(?:으로|로)\\s*(?:할게(?:요)?|합니다|정(?:했어|할게(?:요)?|합니다|하고)|잡(?:고|을게(?:요)?)|삼(?:을게(?:요)?|고)|지정(?:할게(?:요)?|합니다))";
 const subject = "([^.;!?\\n,]+?)", clauseEnd = "(?=\\s*(?:[.;!?\\n,]|$))";
 export const targetDeclarationFrames = [
+  new RegExp(`(?<![\\p{L}\\p{N}_])(${targetHead})${subject}(\\s*(?:의\\s*)?(?:목록|리스트)(?:들)?${identityEnding})${clauseEnd}`, "gu"),
   new RegExp(`(?<![\\p{L}\\p{N}_])(${targetHead})${subject}(${identityEnding}|${selectEnding}|(?:을|를)\\s*(?:뜻해|대상으로\\s*합니다))${clauseEnd}`, "gu"),
   new RegExp(`(?<![\\p{L}\\p{N}_])(${targetHead})${subject}(${selectEnding})(?=\\s|$)`, "gu"),
   new RegExp(`(?<![\\p{L}\\p{N}_])((?:${targetAction}\\s*)?(?:대상|항목)[:：]\\s*)${subject}()${clauseEnd}`, "gu"),

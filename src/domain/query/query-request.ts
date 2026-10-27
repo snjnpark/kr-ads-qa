@@ -19,16 +19,19 @@ export type QueryInput = {
 };
 export type RequestEvidence = {
   id: string;
+  source_id: string;
   role: "filter" | "logic" | "target_declaration" | "operation" | "entity" | "scope" | "reference" | "relation" | "semantic";
   owner: QueryPlan["entity"] | null;
   span: [number, number];
   text: string;
+  value?: unknown;
 };
 export type RequestObligation = {
   id: string;
   kind: RequestEvidence["role"];
   owner: RequestEvidence["owner"];
   evidence_ids: string[];
+  basis: "explicit" | "context" | "default" | "model";
 };
 export type RequestCondition = {
   id: string;
@@ -54,6 +57,7 @@ export type RequestSpec = {
   ambiguities: string[];
   residual: string;
   data_requirements: string[];
+  issues?: { code: string; message: string; kind: "clarification" | "unsupported" }[];
 };
 export type ExecutionPlan = {
   query: QueryPlan & { products: string[] };
@@ -89,6 +93,7 @@ type ProjectionSource = {
   products: string[];
   modelFields: string[];
   clauses: QueryClause[];
+  scope_roles?: { kind: "entity" | "scope" | "reference" | "relation"; span: [number, number]; text: string; entity?: QueryPlan["entity"] }[];
 };
 
 export function snapshotQueryInput(text: string, context: QueryContext | undefined, now: Date, timezone: string, scope: Scope = {}): QueryInput {
@@ -106,19 +111,27 @@ export function snapshotQueryInput(text: string, context: QueryContext | undefin
   };
 }
 
-/** Passive projection only: ready preserves the old preparation state and does not authorize execution. */
+/** Preparation owns source obligations; execution still requires the separate plan validator. */
 export function projectPreparedRequest(input: QueryInput, source: ProjectionSource): RequestSpec {
   const owner = source.scopeEntity ?? null;
   const evidence: RequestEvidence[] = [
     ...source.typed.filters.map((fact, index): RequestEvidence => ({
-      id: `filter:${index}`, role: "filter", owner, span: [...fact.span], text: fact.text,
+      id: `filter:${index}`, source_id: "question", role: "filter", owner, span: [...fact.span], text: fact.text, value: structuredClone(fact.filter),
     })),
     ...source.typed.logic_evidence.map((fact, index): RequestEvidence => ({
-      id: `logic:${index}`, role: "logic", owner, span: [...fact.span], text: fact.text,
+      id: `logic:${index}`, source_id: "question", role: "logic", owner, span: [...fact.span], text: fact.text, value: fact.logical_operator,
     })),
     ...source.clauses.map((clause, index): RequestEvidence => ({
-      id: `declaration:${index}`, role: "target_declaration", owner, span: [...clause.span], text: clause.text,
+      id: `declaration:${index}`, source_id: "question", role: "target_declaration", owner, span: [...clause.span], text: clause.text,
     })),
+    ...(source.request.operation_evidence ?? []).map((fact, index): RequestEvidence => ({
+      id: `operation:${index}`, source_id: "question", role: "operation", owner: null, span: [...fact.span], text: fact.text, value: fact.operation,
+    })),
+    ...(source.scope_roles ?? []).map((fact, index): RequestEvidence => ({
+      id: `scope:${index}`, source_id: "question", role: fact.kind, owner: fact.entity ?? null, span: [...fact.span], text: fact.text,
+      value: fact.kind === "entity" ? fact.entity : fact.kind === "relation" ? source.literalScope.reference === "children" ? "children" : "hierarchy" : fact.kind === "reference" ? source.literalScope.reference : [...source.literalScope.platforms],
+    })),
+    ...(source.request.semantic ? [{ id: "semantic:request", source_id: "question", role: "semantic" as const, owner, span: [0, input.text.length] as [number, number], text: input.text, value: source.request.semantic }] : []),
   ];
   return {
     input: structuredClone(input),
@@ -135,7 +148,8 @@ export function projectPreparedRequest(input: QueryInput, source: ProjectionSour
     logic: source.typed.logical_operator ?? null,
     semantic: source.request.semantic ?? null,
     evidence,
-    obligations: evidence.map(fact => ({ id: fact.id, kind: fact.role, owner: fact.owner, evidence_ids: [fact.id] })),
+    obligations: evidence.filter(fact => (fact.role !== "entity" || fact.owner === owner) && (fact.role !== "relation" || !!source.literalScope.reference))
+      .map(fact => ({ id: fact.id, kind: fact.role, owner: fact.owner, evidence_ids: [fact.id], basis: "explicit" })),
     model_fields: [...source.modelFields],
     unresolved: [...source.typed.unresolved],
     ambiguities: [...source.typed.ambiguities],

@@ -1,11 +1,11 @@
 import Decimal from "decimal.js";
 import { literalProducts, unquotedAdText, queryScopeText } from "../../lib/ad-products";
 import { Clarification, dateRange, type QueryContext } from "./query";
-import { queryLiteralScope, queryRequestRemainder, queryRequestEvidence, childEntity, descendantType, assertEntityCapabilities } from "./query-scope";
+import { queryScopeEvidence, queryRequestEvidence, childEntity, assertEntityCapabilities } from "./query-scope";
 import { analyzeQueryEvidence, queryPlanRemainder, type GroundedQueryFilter } from "./query-evidence";
-import { analyzeQueryAnswerability } from "./query-answerability";
+import { analyzeQueryAnswerability, withQueryEvidence, type QueryAnswerability } from "./query-answerability";
 import type { QueryPlan, QueryTrace } from "./query-model";
-import { projectPreparedRequest, snapshotQueryInput } from "./query-request";
+import { projectPreparedRequest, snapshotQueryInput, type RequestSpec } from "./query-request";
 
 const MONEY_UNITS: Record<string, number> = { 억: 100000000, 만: 10000, 천: 1000, 백: 100, 십: 10 };
 const DATE_LITERAL = /\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일|그제|어제|오늘|금일|지난\s?주|이번\s?주|이번\s?달|지난\s?달/gu;
@@ -116,7 +116,7 @@ const idOperands = (text: string) => idFacts(text).map(fact => fact.value);
 const positiveCreation = (text: string) => /생성(?=$|\s|한|된|됐|되었|됨|했|일)|생성\s*날짜|만든|만들어진|만들어졌|등록(?=$|\s|한|된|했|일)|만들어\s*둔/u.test(queryScopeText(text));
 
 // Literal facts carry their own source spans into the same completeness check as other slots.
-function queryEvidence(text: string, numeric: ReturnType<typeof queryLiterals>, now: Date, timezone: string) {
+function queryEvidence(text: string, numeric: ReturnType<typeof queryLiterals>, now: Date, timezone: string, request: QueryAnswerability, contextEntity?: string) {
   const literalFacts: GroundedQueryFilter[] = [];
   const clean = queryScopeText(text);
   const ids = idFacts(text);
@@ -136,13 +136,13 @@ function queryEvidence(text: string, numeric: ReturnType<typeof queryLiterals>, 
       literalFacts.push({ field_id: "created", filter: { field: "created_at", operator: "between", value: range }, span, text: text.slice(...span) });
     }
   }
-  const request = analyzeQueryAnswerability(text);
   return analyzeQueryEvidence(text, numeric, {
-    literalsFor: clause => queryLiterals(clause, now, timezone), requestRemainder: queryRequestRemainder, literalFacts,
+    literalsFor: clause => queryLiterals(clause, now, timezone), requestRemainder: clause => queryRequestEvidence(clause, contextEntity).residual, literalFacts,
     semantic: request.semantic, operation: request.operation,
   });
 }
 function evidenceClarification(evidence: ReturnType<typeof queryEvidence>): string | undefined {
+  if (evidence.ambiguities.includes("unowned_workflow")) return "요청한 업무를 확인하지 못했습니다. 목록 조회·검사·비교 중 실행할 업무를 구체적으로 알려주세요.";
   if (evidence.ambiguities.includes("unrepresented_condition")) return "해석하지 못한 추가 조건이 있습니다. 적용할 조건을 나누어 구체적으로 알려주세요.";
   if (evidence.ambiguities.includes("ambiguous_scope")) return "부정 표현의 범위가 분명하지 않습니다. 값이 있는지 없는지를 구체적으로 알려주세요.";
   if (evidence.ambiguities.includes("ambiguous_field_attachment")) return "각 항목에 적용할 조건을 구분해 주세요. 일예산과 총예산 중 어느 조건인지 알려주세요.";
@@ -176,26 +176,31 @@ export function assertQueryInput(text: string) {
 }
 
 // Both inference and direct-plan validation consume the same checked source facts.
-export function preprocessQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace> = {}) {
+function readPreparedQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace>, capture: (value: ReturnType<typeof queryScopeEvidence>) => void) {
   trace.outcome = "clarification";
   assertQueryInput(text);
   // Enforce the existing read-only configuration boundary before model interpretation; quoted names stay literal.
   const unquoted = queryScopeText(text);
   const initialRequest = analyzeQueryAnswerability(text, undefined, context);
   trace.answerability = initialRequest;
-  if (initialRequest.status === "unsupported" || initialRequest.status === "clarification") {
+  if (initialRequest.status === "unsupported") {
     const reason = initialRequest.reasons.find(item => item.kind === initialRequest.status)!;
     trace.outcome = initialRequest.status;
     trace.capability_guard = reason.capability;
     throw new Clarification(reason.message);
   }
+  const scopeEvidence = queryScopeEvidence(text, context?.has_results ? context.entity : undefined);
+  const literalScope = scopeEvidence.scope;
+  trace.literal_scope = literalScope;
+  capture(scopeEvidence);
+  if (initialRequest.status === "clarification") throw new Clarification(initialRequest.reasons[0].message);
   const numeric = queryLiterals(text, now, timezone);
   assertLiteralPredicates(text);
   if (numeric.dates.length && /등록(?:하지|되지)\s*않|등록\s*안/u.test(unquoted))
     throw new Clarification("등록 날짜는 긍정 표현의 날짜 또는 기간으로 지정해 주세요.");
-  const typed = queryEvidence(text, numeric, now, timezone);
+  const typed = queryEvidence(text, numeric, now, timezone, initialRequest, context?.has_results ? context.entity : undefined);
   trace.evidence = typed;
-  const request = analyzeQueryAnswerability(text, typed, context);
+  const request = withQueryEvidence(initialRequest, typed);
   trace.answerability = request;
   if (request.status === "unsupported" || request.status === "clarification") {
     const reason = request.reasons.find(item => item.kind === request.status)!;
@@ -237,15 +242,11 @@ export function preprocessQuery(text: string, context: QueryContext | undefined,
       /(?:이름|명칭).*(?:특정\s*(?:단어|문구)|검색어|어떤\s*(?:단어|문구))/u.test(unquotedAdText(text)) && !numeric.quotedStrings.length ||
       /일예산인지.*(?:전체|총)\s*예산인지|예산\s*종류(?:가|는)?\s*다른|금액\s*단위는\s*빠졌/u.test(unquoted))
     throw new Clarification("비교할 값과 항목을 구체적으로 알려주세요.");
-  const literalScope = queryLiteralScope(text, context?.has_results ? context.entity : undefined);
-  trace.literal_scope = literalScope;
   const scopeEntity = literalScope.entity ?? (literalScope.reference && context?.has_results ? literalScope.reference === "children" ? childEntity(context.entity) : context.entity as QueryPlan["entity"] : undefined);
   const scopedPlatforms = literalScope.platforms.length ? literalScope.platforms : literalScope.reference && context?.has_results ? context.platforms : [];
   const products = literalProducts(text, scopedPlatforms);
   if (scopeEntity) assertEntityCapabilities(scopeEntity, scopedPlatforms, products);
   if (literalScope.reference === "children" && !scopeEntity) throw new Clarification("조회할 하위 대상 종류를 지정해 주세요.");
-  if (literalScope.reference === "children" && context && scopeEntity && !descendantType(context.entity, scopeEntity))
-    throw new Clarification("이전 결과 아래에서 조회할 수 있는 하위 대상을 지정해 주세요.");
   if (literalScope.reference && context?.platforms.length && literalScope.platforms.some(platform => !context.platforms.includes(platform)))
     throw new Clarification("이전 결과의 매체와 다릅니다. 새로 검색할지 이전 결과를 좁힐지 알려주세요.");
   const boundFields = new Set(typed.filters.map(fact => fact.field_id));
@@ -255,12 +256,41 @@ export function preprocessQuery(text: string, context: QueryContext | undefined,
   if (modelFields.includes("daily") && !/일\s*예\s*산|하루\s*예\s*산|일일(?:에)?\s*예\s*산|총\s*예\s*산|전체\s*예\s*산/u.test(unquoted))
     modelFields.push("lifetime");
   trace.grounded = { ...trace.grounded, model_fields: modelFields };
-  const clauses = queryRequestEvidence(text).clauses;
+  const clauses = scopeEvidence.clauses;
   if (clauses.length) trace.grounded.request_clauses = clauses;
   if (!modelFields.length && queryPlanRemainder(typed.residual, request.operation, request.semantic))
     throw new Clarification("해석하지 못한 추가 조건이 있습니다. 적용할 조건을 나누어 구체적으로 알려주세요.");
-  const spec = projectPreparedRequest(snapshotQueryInput(text, context, now, timezone), { typed, request, literalScope, scopeEntity, products, modelFields, clauses });
+  const spec = projectPreparedRequest(snapshotQueryInput(text, context, now, timezone), { typed, request, literalScope, scopeEntity, products, modelFields, clauses, scope_roles: scopeEvidence.roles });
   return { unquoted, numeric, typed, request, evidence, literalScope, scopeEntity, products, modelFields, spec };
 }
-export type PreparedQuery = ReturnType<typeof preprocessQuery>;
+export type PreparedQuery = ReturnType<typeof readPreparedQuery>;
+export function preprocessQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace> = {}): PreparedQuery {
+  return readPreparedQuery(text, context, now, timezone, trace, () => {});
+}
+
+export type RequestPreparation =
+  | { kind: "prepared"; prepared: PreparedQuery; spec: RequestSpec }
+  | { kind: "rejected"; error: Clarification; spec: RequestSpec };
+
+/** Rejected requests retain their source and unresolved obligations; they never become executable plans. */
+export function prepareRequest(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace> = {}): RequestPreparation {
+  let scopeEvidence: ReturnType<typeof queryScopeEvidence> | undefined;
+  try {
+    const prepared = readPreparedQuery(text, context, now, timezone, trace, value => { scopeEvidence = value; });
+    return { kind: "prepared", prepared, spec: prepared.spec };
+  } catch (error) {
+    if (!(error instanceof Clarification)) throw error;
+    const literalScope: PreparedQuery["literalScope"] = trace.literal_scope ?? { platforms: [] };
+    const request: QueryAnswerability = trace.answerability ?? { status: "clarification", reasons: [], operations: [], data_requirements: [] };
+    const typed: ReturnType<typeof queryEvidence> = trace.evidence ?? { filters: [], relevant_fields: [], logical_operator: undefined, complete: false,
+      unresolved: [], ambiguities: [], residual: text, logic_evidence: [] };
+    const spec = projectPreparedRequest(snapshotQueryInput(text, context, now, timezone), {
+      typed, request, literalScope, scopeEntity: literalScope.entity, products: [], modelFields: [],
+      clauses: scopeEvidence?.clauses ?? [], scope_roles: scopeEvidence?.roles,
+    });
+    spec.state = trace.outcome === "unsupported" ? "unsupported" : "needs_clarification";
+    spec.issues = request.reasons.length ? structuredClone(request.reasons) : [{ code: trace.capability_guard ?? "input_contract", kind: "clarification", message: error.message }];
+    return { kind: "rejected", error, spec };
+  }
+}
 

@@ -560,6 +560,9 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
   if (filters.length > 1 && /[()（）]/u.test(mask(residual))) ambiguities.push("nested_logic");
   const logical_operator = ambiguities.some(item => item === "mixed_logic" || item === "nested_logic") ? undefined : hasOr ? "OR" as const : "AND" as const;
   const remaining = carrierResidual(residual, options.semantic, options.operation);
+  // A carrier may recognize a workflow word but cannot authorize a different/default operation.
+  if (!options.operation && /검수|점검|검사|비교|정책|가이드|이력|규칙|룰|\bQA\b/iu.test(queryScopeText(residual)))
+    ambiguities.push("unowned_workflow");
   if (remaining) {
     unresolved.push(`residual:${remaining}`);
     const unboundMarkers = fields.filter(anchor => !filters.some(fact => fact.field_id === anchor.field_id && fact.span[0] <= anchor.start && fact.span[1] >= anchor.end))

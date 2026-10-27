@@ -62,6 +62,7 @@ const scopeBoundary = "(?=$|[\\s,.;?!]|캠페인|광고|소재|키워드|애셋|
 const vendorCarrier = new RegExp(`^\\s*(?:쪽(?:의|에서|은|는)?|기준(?:으로|에서)?|에서는|에는|에서도|에도|에서|에|의|은|는|으로요|로요|으로|로)${scopeBoundary}`, "u");
 const complementCarrier = new RegExp(`^\\s*나머지\\s*(?:매체|플랫폼)(?:의|에서|를|만)?${scopeBoundary}`, "u");
 const platformCountCarrier = new RegExp(`^\\s*(\\d+|두|둘|세|셋|네|넷|다섯)\\s*(?:개\\s*)?(?:매체|플랫폼)(?:의|에서|를|만)?${scopeBoundary}`, "u");
+const productCarrier = /^\s*(?:상품(?:(?:으로|로)\s*(?:등록된|설정된)|(?:에|에서)\s*(?:등록된|속한|있는)|의)|(?:으로|로)\s*(?:운영하는|등록한|등록된|설정한|설정된)|(?:에|에서)\s*(?:등록한|등록된|속한|있는))(?=$|\s|캠페인|광고|소재|키워드|애셋|에셋)/u;
 const referenceObject = "(?:캠페인|광고\\s*(?:그룹|세트)|(?:애셋|에셋)\\s*그룹|소재|키워드|광고)(?:들)?";
 const resultNoun = `(?:(?:빈\\s*)?(?:(?:검색|조회)\\s*)?(?:${referenceObject}\\s*)?(?:(?:검색|조회)\\s*)?(?:결과|목록|리스트)|것들?|항목들?)`;
 const referenceTail = "(?=$|[\\s,.;?!]|의|중|에(?:서|는)?(?=\\s|$|하위|아래|밑|캠페인|광고|소재|키워드|애셋|에셋)|은|는|을|를|만|도|하위|아래|밑|캠페인|광고|소재|키워드|애셋|에셋)";
@@ -75,8 +76,11 @@ const childReferenceRole = new RegExp(`^\\s*(?:(?:(?:의|에서|에는|에|중�
 const childPrefixRole = new RegExp(`^\\s*(?:(?:의|에서|에는|에|중에서|중)\\s*)?(?:${referenceObject}(?:의|에서|에)?\\s*)?(?:하위|아래|밑)(?:\\s*범위)?(?:의|에서|에|만)?(?:\\s*(?:있는|속한|연결된|등록된))?(?=\\s+(?:일\\s*예산|총\\s*예산|종료\\s*(?:일|날짜)|상태|이름|명칭|생성일|ID\\b|아이디))`, "iu");
 const freshSearchRole = /^\s*(?:(?:의\s*)?범위(?:를|는)?\s*적용하지\s*않고\s*(?:새롭게|새로|처음부터)\s*(?:(?:조회|검색)(?:해서|하여)?|찾)|(?:와|과)\s*관계없이\s*(?:새롭게|새로|처음부터)\s*(?:(?:조회|검색)(?:해서|하여)?|찾)|에\s*제한하지\s*않고\s*(?:확인|조회|검색)(?:해서|하여)?|(?:를|을|는|은)\s*사용하지\s*않고\s*(?:새롭게|새로|처음부터)\s*(?:(?:조회|검색)(?:해서|하여)?|찾))/u;
 const freshSearchReference = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${priorTime}|기존|이|그|해당)\\s*${resultNoun}`, "gu");
+const selectedScopePattern = /(?<![\p{L}\p{N}_])(?:(?:현재|화면(?:에서|의)?)(?:\s*현재)?\s*)?선택(?:한|된)\s*(?:조회\s*)?범위(?:를|는)?\s*적용(?:하여|해서|해)(?=$|[\s,.;?!])/gu;
 
-function literalScopeEvidence(text: string, contextEntity?: string) {
+export type QueryScopeRole = { kind: "entity" | "scope" | "reference" | "relation"; span: [number, number]; text: string; entity?: QueryPlan["entity"] };
+
+export function queryScopeEvidence(text: string, contextEntity?: string) {
   const clean = queryScopeText(text);
   const conditionMarker = /일\s*예산|하루\s*예산|총\s*예산|전체\s*예산|예산|종료\s*(?:일|날짜)|상태|이름|명칭|생성(?:일|\s*날짜)?|만든|\bID\b|아이디/iu;
   const displayOnly = /^(?:도|을|를)?\s*(?:(?:함께|같이)\s*)?(?:보여|표시|알려|출력)/u;
@@ -103,6 +107,20 @@ function literalScopeEvidence(text: string, contextEntity?: string) {
     genericAdvertisingSpans.push([offset, offset + match.length]);
     return " ".repeat(match.length);
   });
+  // Owned scope words may occur inside a reference bridge; unknown words and conditions stay visible.
+  const relationCharacters = text.split("");
+  for (const [start, end] of genericAdvertisingSpans) relationCharacters.fill(" ", start, end);
+  for (const mention of mentions) {
+    relationCharacters.fill(" ", mention.start, mention.exclusion_end);
+    const carrier = (mention.negative ? complementCarrier : vendorCarrier).exec(text.slice(mention.exclusion_end));
+    if (carrier) relationCharacters.fill(" ", mention.exclusion_end, mention.exclusion_end + carrier[0].length);
+  }
+  for (const { start, end } of productsFound) {
+    relationCharacters.fill(" ", start, end);
+    const carrier = productCarrier.exec(text.slice(end));
+    if (carrier) relationCharacters.fill(" ", end, end + carrier[0].length);
+  }
+  const relationText = relationCharacters.join("");
   const entityMentions: (ScopeSpan & { entity: QueryPlan["entity"] })[] = [];
   for (const [entity, pattern] of entityPatterns) for (const match of objectText.matchAll(new RegExp(pattern, "giu"))) {
     const end = match.index! + match[0].length, exclusion = excluded.exec(objectText.slice(end));
@@ -115,7 +133,7 @@ function literalScopeEvidence(text: string, contextEntity?: string) {
   if (entities.length > 1) {
     const descending = entities.every((e,i) => i === 0 || descendantType(entities[i-1], e));
     const bridges = matches.slice(1).map((mention, index) => ({ start: matches[index].end, end: mention.start,
-      text: objectText.slice(matches[index].end, mention.start) }));
+      text: relationText.slice(matches[index].end, mention.start) }));
     const hierarchy = /^\s*(?:들\s*)?(?:(?:(?:검색|조회)\s*)?(?:결과|목록|리스트)\s*)?(?:(?:의|에|에서)\s*)?(?:(?:하위|아래|밑)(?:의|에서|에)?(?:\s*(?:속한|있는|연결된|등록된))?|속한)\s*/u;
     if (matches.slice(0, -1).some(mention => mention.name_field) || bridges.some(bridge => {
       const condition = conditionMarker.exec(bridge.text);
@@ -153,8 +171,8 @@ function literalScopeEvidence(text: string, contextEntity?: string) {
     throw new Clarification("이전 결과를 이어서 볼지 새로 조회할지 명확히 지정해 주세요.");
   const membershipSpans: [number, number][] = [];
   const childSpans = references.flatMap(match => {
-    const start = match.index + match[0].length, role = childReferenceRole.exec(clean.slice(start)) ?? childPrefixRole.exec(clean.slice(start));
-    const member = /^\s*(?:에\s*한해서|에\s*한해|안(?:에서|에\s*있는|의)|에\s*있는|에\s*속한)(?=$|\s)/u.exec(clean.slice(start));
+    const start = match.index + match[0].length, role = childReferenceRole.exec(relationText.slice(start)) ?? childPrefixRole.exec(relationText.slice(start));
+    const member = /^\s*(?:에\s*한해서|에\s*한해|안(?:에서|에\s*있는|의)|에\s*있는|에\s*속한)(?=$|\s)/u.exec(relationText.slice(start));
     if (member) membershipSpans.push([start, start + member[0].length]);
     if (contextEntity && entity && member) {
       if (entity === contextEntity) return [];
@@ -165,9 +183,25 @@ function literalScopeEvidence(text: string, contextEntity?: string) {
     return role ? [[start, start + role[0].length] as [number, number]] : [];
   });
   const reference = references.length ? (childSpans.length ? "children" as const : "previous" as const) : undefined;
+  const referenceClaims = references.map(match => {
+    const end = match.index + match[0].length;
+    if (!new RegExp(`^${priorTime}`, "u").test(match[0])) return { span: [match.index, end] as [number, number] };
+    const inside = matches.find(mention => mention.start >= match.index && mention.end <= end);
+    const following = matches.find(mention => mention.start >= end);
+    const owner = inside ?? (following && !relationText.slice(end, following.start).trim() ? following : undefined);
+    return { span: [match.index, owner ? Math.max(end, owner.end) : end] as [number, number], ...(owner ? { entity: owner.entity } : {}) };
+  });
+  const claimedEntities = [...new Set(referenceClaims.flatMap(claim => claim.entity ? [claim.entity] : []))];
+  if (claimedEntities.length > 1 || (contextEntity && claimedEntities.some(claim => claim !== contextEntity)))
+    throw new Clarification("질문에 명시한 이전 대상과 현재 결과의 대상 종류가 다릅니다. 이전 결과를 다시 검색해 주세요.");
+  if (reference === "previous" && contextEntity && entity && contextEntity !== entity)
+    throw new Clarification("이전 결과와 다른 종류의 대상을 조회하려면 하위 관계를 명확히 지정해 주세요.");
+  if (reference === "children" && contextEntity && entity && !descendantType(contextEntity, entity))
+    throw new Clarification("이전 결과 아래에서 조회할 수 있는 하위 대상을 지정해 주세요.");
   if (reference === "children" && references.some(match => conditionMarker.test(clean.slice(0, match.index))))
     throw new Clarification("이전 결과 앞의 조건은 상위 항목을 수식할 수 있습니다. 하위 관계를 먼저 지정한 뒤 하위 항목의 조건을 알려주세요.");
-  const spans: [number, number][] = [...scopeSpans(mentions, clean), ...scopeSpans(objects, objectText), ...genericAdvertisingSpans, ...relationSpans, ...childSpans, ...membershipSpans, ...freshSearchSpans,
+  const selectedScopeSpans: [number, number][] = [...clean.matchAll(selectedScopePattern)].map(match => [match.index, match.index + match[0].length]);
+  const spans: [number, number][] = [...scopeSpans(mentions, clean), ...scopeSpans(objects, objectText), ...genericAdvertisingSpans, ...relationSpans, ...childSpans, ...membershipSpans, ...freshSearchSpans, ...selectedScopeSpans,
     ...referenceMentions.map(match => [match.index, match.index + match[0].length] as [number, number])];
   for (const mention of mentions) {
     const carrier = (mention.negative ? complementCarrier : vendorCarrier).exec(text.slice(mention.exclusion_end));
@@ -203,37 +237,43 @@ function literalScopeEvidence(text: string, contextEntity?: string) {
     spans.push([restatement.index, restatement.index + restatement[0].length]);
   // Registration/membership wording belongs to a product only when directly attached to its proved span.
   for (const [, end] of productSpans) {
-    const carrier = /^\s*(?:상품(?:(?:으로|로)\s*(?:등록된|설정된)|(?:에|에서)\s*(?:등록된|속한|있는)|의)|(?:으로|로)\s*(?:운영하는|등록한|등록된|설정한|설정된)|(?:에|에서)\s*(?:등록한|등록된|속한|있는))(?=$|\s|캠페인|광고|소재|키워드|애셋|에셋)/u.exec(text.slice(end));
+    const carrier = productCarrier.exec(text.slice(end));
     if (carrier) spans.push([end, end + carrier[0].length]);
   }
-  const prefixRemainder = (end: number) => {
-    const prefix = objectText.slice(0, end).split("");
-    for (const [start, stop] of spans) prefix.fill(" ", start, stop);
-    return carrierResidual(prefix.join(""));
-  };
+  const targets = matches.filter(mention => !mention.name_field).map(({ start, end, entity }) => ({ start, end, entity }));
+  const characters = text.split("");
+  for (const [start, end] of spans) characters.fill(" ", start, end);
+  const declarations = consumeQueryDeclarations(text, characters.join(""), targets);
+  if (declarations.clauses.some(clause => targets.filter(target => target.start >= clause.span[0] && target.end <= clause.span[1]).at(-1)!.entity !== entity))
+    throw new Clarification("선언한 조회 대상과 실제 조회 대상이 다릅니다. 대상 종류를 하나로 지정해 주세요.");
+  const prefixRemainder = (end: number) => carrierResidual(declarations.text.slice(0, end));
   if (entities.length > 1 && matches.slice(0, -1).some(parent => prefixRemainder(parent.start)))
     throw new Clarification("상위 항목의 조건을 하위 항목의 조건으로 바꿀 수 없습니다. 상위 항목을 먼저 검색한 뒤 하위 항목을 조회해 주세요.");
   for (const account of objectText.matchAll(/(?<![\p{L}\p{N}_])(?:광고\s*)?계정(?=$|\s|의|에|명)/gu)) {
     if ((!matches.length || account.index < matches[0].start) && prefixRemainder(account.index))
       throw new Clarification("계정 필드의 조건을 광고 항목의 조건으로 바꿀 수 없습니다. 조회할 계정은 화면에서 선택해 주세요.");
   }
-  return { scope: { ...(entity ? { entity } : {}), platforms, ...(reference ? { reference } : {}) }, spans,
-    targets: matches.filter(mention => !mention.name_field).map(({ start, end, entity }) => ({ start, end, entity })) };
+  const roles: QueryScopeRole[] = [
+    ...mentions.map((mention): QueryScopeRole => ({ kind: "scope", span: [mention.start, mention.exclusion_end], text: text.slice(mention.start, mention.exclusion_end) })),
+    ...productSpans.map((span): QueryScopeRole => ({ kind: "scope", span, text: text.slice(...span) })),
+    ...selectedScopeSpans.map((span): QueryScopeRole => ({ kind: "scope", span, text: text.slice(...span) })),
+    ...matches.map((mention): QueryScopeRole => ({ kind: "entity", entity: mention.entity, span: [mention.start, mention.end], text: text.slice(mention.start, mention.end) })),
+    ...referenceClaims.map((claim): QueryScopeRole => ({ kind: "reference", ...claim, text: text.slice(...claim.span) })),
+    ...[...relationSpans, ...childSpans].map((span): QueryScopeRole => ({ kind: "relation", span, text: text.slice(...span) })),
+  ];
+  return { scope: { ...(entity ? { entity } : {}), platforms, ...(reference ? { reference } : {}) }, spans, targets,
+    roles: [...new Map(roles.map(role => [`${role.kind}:${role.span.join(":")}`, role])).values()],
+    residual: declarations.text, clauses: declarations.clauses, ...(claimedEntities.length ? { reference_entity: claimedEntities[0] } : {}) };
 }
 
 export function queryLiteralScope(text: string, contextEntity?: string) {
-  return literalScopeEvidence(text, contextEntity).scope;
+  return queryScopeEvidence(text, contextEntity).scope;
 }
 
 /** Remove only scope spans proved by the same interpretation used by queryLiteralScope. */
-export function queryRequestEvidence(text: string) {
-  const { scope, spans, targets } = literalScopeEvidence(text);
-  const characters = text.split("");
-  for (const [start, end] of spans) characters.fill(" ", start, end);
-  const declarations = consumeQueryDeclarations(text, characters.join(""), targets);
-  if (declarations.clauses.some(clause => targets.filter(target => target.start >= clause.span[0] && target.end <= clause.span[1]).at(-1)!.entity !== scope.entity))
-    throw new Clarification("선언한 조회 대상과 실제 조회 대상이 다릅니다. 대상 종류를 하나로 지정해 주세요.");
-  return { residual: declarations.text, clauses: declarations.clauses };
+export function queryRequestEvidence(text: string, contextEntity?: string) {
+  const { residual, clauses } = queryScopeEvidence(text, contextEntity);
+  return { residual, clauses };
 }
 
 export function queryRequestRemainder(text: string): string {
