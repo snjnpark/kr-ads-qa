@@ -127,7 +127,7 @@ function queryEvidence(text: string, numeric: ReturnType<typeof queryLiterals>, 
     const [label, range] = numeric.dates[0];
     const escaped = label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
     const verb = "(?:생성(?:한|된|됐|되었|됨|했고|(?=$|\\s))|만든|만들어진|만들어졌|만들어\\s*둔|등록(?:한|된|했|(?=$|\\s)))";
-    const before = new RegExp(`${escaped}(?:에|의|\\s*하루\\s*동안)?\\s*(?:새로\\s*)?${verb}`, "u").exec(clean);
+    const before = new RegExp(`${escaped}(?:\\s*날짜)?(?:에|의|\\s*하루\\s*동안)?\\s*(?:새로\\s*)?${verb}`, "u").exec(clean);
     const after = new RegExp(`(?:생성(?:일|\\s*날짜)|등록일)(?:이|가|은|는)?\\s*(?:기준(?:은|이|는)?\\s*)?${escaped}(?:인)?`, "u").exec(clean);
     const found = before ?? after;
     if (found) {
@@ -236,7 +236,7 @@ export function preprocessQuery(text: string, context: QueryContext | undefined,
       /(?:이름|명칭).*(?:특정\s*(?:단어|문구)|검색어|어떤\s*(?:단어|문구))/u.test(unquotedAdText(text)) && !numeric.quotedStrings.length ||
       /일예산인지.*(?:전체|총)\s*예산인지|예산\s*종류(?:가|는)?\s*다른|금액\s*단위는\s*빠졌/u.test(unquoted))
     throw new Clarification("비교할 값과 항목을 구체적으로 알려주세요.");
-  const literalScope = queryLiteralScope(text);
+  const literalScope = queryLiteralScope(text, context?.has_results ? context.entity : undefined);
   trace.literal_scope = literalScope;
   const scopeEntity = literalScope.entity ?? (literalScope.reference && context?.has_results ? literalScope.reference === "children" ? childEntity(context.entity) : context.entity as QueryPlan["entity"] : undefined);
   const scopedPlatforms = literalScope.platforms.length ? literalScope.platforms : literalScope.reference && context?.has_results ? context.platforms : [];

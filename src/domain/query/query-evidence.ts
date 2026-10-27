@@ -1,7 +1,7 @@
 import type { QueryPlan } from "./query-model";
 import { queryScopeText, stripAdProductMentions } from "../../lib/ad-products";
 import { ACTIVE, INACTIVE } from "./query";
-import { composedComparisonForms, requestPhraseLength, settingPrefixLength, settingPresenceForms } from "./query-language";
+import { composedComparisonForms, quantifiedLogicForms, requestPhraseLength, settingPrefixLength, settingPresenceForms, workflowPhraseLength } from "./query-language";
 
 type FieldId = "daily" | "lifetime" | "status" | "end" | "name" | "created" | "id";
 type Literals = { amounts: string[]; quotedStrings: string[]; dates?: unknown[] };
@@ -66,9 +66,13 @@ function comparisonMatch(clause: string) {
   for (const [operator, pattern] of [...composedComparisonForms, ...comparisons]) {
     const found = pattern.exec(clause.slice(comparisonStart));
     if (found) {
-      const suffix = /^(?:\s*에\s*해당하는|(?:\s*(?:으로|로))?\s*(?:설정한|설정해\s*둔|제한해서|잡아\s*둔|잡은|잡힌|정한|지정한))?/u.exec(clause.slice(comparisonStart + found[0].length))![0];
+      const suffix = /^(?:\s*에\s*해당하는|(?:\s*(?:으로|로))?\s*(?:(?:설정|지정|정)한|설정해\s*둔|제한해서|잡아\s*둔|잡은|잡힌|(?:잡혀|정해져|설정되어|지정되어)\s*있는))?/u.exec(clause.slice(comparisonStart + found[0].length))![0];
       const nominal = /^\s*(?:금액|값)인(?=$|\s)/u.exec(clause.slice(comparisonStart + found[0].length + suffix.length))?.[0].length ?? 0;
-      return { operator, length: comparisonStart + found[0].length + suffix.length + nominal };
+      const length = comparisonStart + found[0].length + suffix.length + nominal;
+      const inverse = /^\s*(?:것(?:이|은)|게|건)\s*아닌(?=$|\s)/u.exec(clause.slice(length));
+      const opposite = { eq: "ne", ne: "eq", lt: "gte", lte: "gt", gt: "lte", gte: "lt" } as const;
+      if (inverse && Object.hasOwn(opposite, operator)) return { operator: opposite[operator as keyof typeof opposite], length: length + inverse[0].length };
+      return { operator, length };
     }
   }
 }
@@ -104,7 +108,7 @@ function nameMatch(clause: string, allowBare = false) {
   for (const operand of operands) {
     if (!operand.quoted && (/\s$/u.test(operand.value) || /(?:^|\s)(?:또는|혹은|그리고|아니면)(?:\s|$)/u.test(operand.value))) continue;
     const rest = clause.slice(start + operand.length);
-    const particle = /^\s*(?:(?:(?:이라는|이란|라는|란)\s*)?(?:글자|문구|문자열|단어|말)(?:가|이)?|하고|가|이(?!고|거나|며)|을|를)?\s*/u.exec(rest)![0];
+    const particle = /^\s*(?:(?:(?:이라는|이란|라는|란)\s*)?(?:글자|문구|문자열|단어|말)(?:가|이|을|를)?|하고|가|이(?!고|거나|며)|을|를)?\s*/u.exec(rest)![0];
     const tail = rest.slice(particle.length);
     for (const [operator, pattern] of patterns) {
       const predicate = pattern.exec(tail);
@@ -232,7 +236,7 @@ const workflowCarriers: Partial<Record<QueryPlan["operation"], RegExp[]>> = {
 
 function withoutWorkflowTopics(text: string, operation?: QueryPlan["operation"]) {
   const pattern = operation === "policy" ? /(?:운영\s*)?정책\s*적용\s*(?:상태|내용|여부)(?:을|를|은|는|이|가)?(?=$|[\s,.;?!·])/gu
-    : operation === "history" ? /(?<![\p{L}\p{N}_])(?:(?:(?:일|일일|하루|총|전체)\s*)?예산|타겟팅)(?=\s*의?\s*변경\s*(?:이력|내역|기록)(?=$|[\s,.;?!·]|을|를|의))/gu : undefined;
+    : operation === "history" ? /(?<![\p{L}\p{N}_])(?:(?:(?:일|일일|하루|총|전체)\s*)?예산|타겟팅)(?=\s*(?:의\s*)?(?:설정(?:이|의)?\s*)?(?:변경|바뀐|수정된)\s*(?:이력|내역|기록)(?=$|[\s,.;?!·]|을|를|의))/gu : undefined;
   if (!pattern) return text;
   const characters = text.split("");
   for (const found of mask(text).matchAll(pattern)) {
@@ -250,7 +254,7 @@ export function carrierResidual(text: string, semantic?: QueryPlan["semantic"], 
   for (let cursor = 0; cursor < text.length; cursor++) {
     if (!reachable.has(cursor)) continue;
     const lengths = [...carrierParts, ...(semantic ? semanticCarriers[semantic] : []), ...(operation ? workflowCarriers[operation] ?? [] : [])].map(pattern => pattern.exec(text.slice(cursor))?.[0].length ?? 0);
-    lengths.push(requestPhraseLength(text.slice(cursor)));
+    lengths.push(requestPhraseLength(text.slice(cursor)), workflowPhraseLength(text.slice(cursor), operation));
     for (const consumed of lengths) if (consumed) {
       const end = cursor + consumed;
       reachable.add(end); furthest = Math.max(furthest, end);
@@ -412,7 +416,7 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
           const operand = [...before.matchAll(quoted)].at(-1);
           if (operand && !fields.some(item => item.start > operand.index && item.start < anchor.start) &&
               !filters.some(item => item.span[1] > operand.index && item.span[0] < anchor.start) &&
-              /^\s*(?:(?:이라는|라는|란)(?:\s*(?:글자|문구|문자열|단어|말)(?:가|이)?)?|을|를|가|이)?\s*$/u.test(before.slice(operand.index + operand[0].length))) {
+              /^\s*(?:(?:(?:이라는|라는|란)\s*)?(?:글자|문구|문자열|단어|말)(?:가|이|을|를)?|이라는|라는|란|을|를|가|이)?\s*$/u.test(before.slice(operand.index + operand[0].length))) {
             const particle = /^(?:\s*(?:안에|에는|에서|에|이|가|은|는|을|를))*\s*/u.exec(clause)![0];
             const definition = /^\s*(?:이라는|라는|란)\s*$/u.test(before.slice(operand.index + operand[0].length)) && /^\s*의(?=\s|$)/u.exec(clause);
             const reverse = nameMatch(operand[0] + clause.slice(particle.length));
@@ -527,7 +531,7 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
   const visible = mask(residual);
   for (let cursor = 0; cursor < visible.length; cursor++) {
     if (cursor && !/[\s,.;?!]/u.test(visible[cursor - 1])) continue;
-    for (const [logical_operator, pattern] of logicPhrases) {
+    for (const [logical_operator, pattern] of [...quantifiedLogicForms, ...logicPhrases]) {
       const phrase = pattern.exec(visible.slice(cursor));
       if (phrase) {
         const span: [number, number] = [cursor, cursor + phrase[0].length];
@@ -543,7 +547,7 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
     for (const { span: [start, end] } of logic_evidence) quantified = quantified.slice(0, start) + " ".repeat(end - start) + quantified.slice(end);
     const owned = filters.length > 1 && logic_evidence.every(item =>
       (item.span[0] >= proofUnits.at(-1)!.span[1] || item.span[1] <= proofUnits[0].span[0]) &&
-      (!/두\s*조건|둘\s*중/u.test(item.text) || filters.length === 2) && (!/세\s*조건/u.test(item.text) || filters.length === 3)) &&
+      (!/두\s*(?:조건|가지)|둘\s*(?:중|다)/u.test(item.text) || filters.length === 2) && (!/세\s*(?:조건|가지)/u.test(item.text) || filters.length === 3)) &&
       fields.every(anchor => filters.some(fact => fact.field_id === anchor.field_id && fact.span[0] <= anchor.start && fact.span[1] >= anchor.end)) &&
       !carrierResidual(quantified, options.semantic, options.operation);
     if (owned) residual = quantified;
