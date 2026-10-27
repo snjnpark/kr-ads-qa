@@ -368,7 +368,7 @@ export function execute(
           return null;
         try {
           const range = dateRange(
-            query.text,
+            query.date_expression ?? query.text,
             query.reference_time,
             entity.timezone,
           );

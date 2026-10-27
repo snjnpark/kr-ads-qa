@@ -27,10 +27,17 @@ const unquotedNamePredicate = new RegExp(`(${nameMarker}(?:에|에서)?\\s+)[^\\
 const unquotedExactName = new RegExp(`(${nameMarker}(?:이|가)\\s+)[^\\s,;\\x22\\x27\\x60“”‘’]{1,64}?(?:인|와\\s*같은|과\\s*같은)(?=\\s|$)`, "gu");
 export const precedingQuotedName = /(?:"[^"]+"|'[^']+'|“[^”]+”|‘[^’]+’|`[^`]+`)(?:\s*(?:이라는|라는)\s*(?:문구|말|글자|단어|문자열))?(?:이|가|을|를|와|과)?\s*$/u;
 export const queryIntroduction = /^\s*(?:인수인계(?:를)?\s*받는\s*담당자(?:야|입니다)[.!?]?|검수\s*담당자(?:라|인데)|보고서에\s*쓸|다음\s*담당자에게\s*줄|담당\s*캠페인을\s*점검하려고요[.!?])(?=\s|$)/u;
+/** A leading name predicate has no operand to protect; quoted values remain literals. */
+export function missingNameOperand(text: string): boolean {
+  return /^(?:(?:(?:정확히|정확하게|완전히|딱)\s*)?(?:같은|동일한|일치하는)|(?:안\s*)?포함(?:된|한|하는|되는|되어(?:\s*있는)?|(?:되지|하지)\s*않(?:은|는)|\s*안\s*(?:된|한))?|미포함(?:된|한|인)?|(?:안\s*)?들어(?:가)?\s*(?:있는|간|가는)|들어(?:가|있)?지\s*않(?:은|는)|제외(?:된|한|하는)?|빠진|없는|있는)(?=$|[\s,.;?!])/u.test(text.trimStart());
+}
 export function queryScopeText(text: string): string {
   // Keep the complete marker for object ownership and unresolved field detection; mask only its value clause.
-  const maskValue = (match: string, marker: string, offset: number, source: string) => precedingQuotedName.test(source.slice(0, offset))
-    ? match : marker + " ".repeat(match.length - marker.length);
+  const maskValue = (match: string, marker: string, offset: number, source: string) => {
+    // A predicate with no preceding operand is a missing value, not a long bare name.
+    const missingOperand = missingNameOperand(match.slice(marker.length));
+    return precedingQuotedName.test(source.slice(0, offset)) || missingOperand ? match : marker + " ".repeat(match.length - marker.length);
+  };
   return unquotedAdText(text
     .replace(unquotedNamePredicate, maskValue)
     .replace(unquotedExactName, maskValue)).replace(queryIntroduction,

@@ -6,7 +6,8 @@ import { analyzeQueryEvidence, queryPlanRemainder, type GroundedQueryFilter } fr
 import { analyzeQueryAnswerability, withQueryEvidence, type QueryAnswerability } from "./query-answerability";
 import type { QueryPlan, QueryTrace } from "./query-model";
 import { fieldPaths } from "./query-contract";
-import { projectPreparedRequest, snapshotQueryInput, type RequestSpec } from "./query-request";
+import { projectPreparedRequest, snapshotQueryInput, type QueryInput, type RequestSpec } from "./query-request";
+import { bindSlotAnswer, type RequestContinuation, type RequestSlotProof } from "./query-clarification";
 
 const MONEY_UNITS: Record<string, number> = { 억: 100000000, 만: 10000, 천: 1000, 백: 100, 십: 10 };
 const DATE_LITERAL = /\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일|그제|어제|오늘|금일|지난\s?주|이번\s?주|이번\s?달|지난\s?달/gu;
@@ -117,8 +118,11 @@ const idOperands = (text: string) => idFacts(text).map(fact => fact.value);
 const positiveCreation = (text: string) => /생성(?=$|\s|한|된|됐|되었|됨|했|일)|생성\s*날짜|만든|만들어진|만들어졌|등록(?=$|\s|한|된|했|일)|만들어\s*둔/u.test(queryScopeText(text));
 
 // Literal facts carry their own source spans into the same completeness check as other slots.
-function queryEvidence(text: string, numeric: ReturnType<typeof queryLiterals>, now: Date, timezone: string, request: QueryAnswerability, contextEntity?: string) {
-  const literalFacts: GroundedQueryFilter[] = [];
+function queryEvidence(text: string, numeric: ReturnType<typeof queryLiterals>, now: Date, timezone: string, request: QueryAnswerability, contextEntity?: string, proof?: RequestSlotProof) {
+  const literalFacts: GroundedQueryFilter[] = proof ? [{
+    field_id: proof.slot.kind === "budget_criterion" ? proof.slot.field === "budget.daily" ? "daily" : "lifetime" : proof.slot.kind === "name_value" ? "name" : "created",
+    filter: structuredClone(proof.binding.filter), span: [...proof.slot.span], text: proof.slot.text,
+  }] : [];
   const clean = queryScopeText(text);
   const ids = idFacts(text);
   if (ids.length === 1) {
@@ -176,6 +180,26 @@ export function assertQueryInput(text: string) {
   if (!text.trim() || text.length > 2000) throw new Clarification("2,000자 이내의 광고 설정 질문을 입력해 주세요.");
 }
 
+type ContinuedInput = { input: QueryInput; proof: RequestSlotProof };
+function continuedInput(text: string, context: QueryContext | undefined, now: Date, timezone: string, continuation: RequestContinuation): ContinuedInput {
+  const input = continuation.request.input;
+  if (text !== input.text || now.getTime() !== input.reference_time || timezone !== input.timezone || continuation.request.continuation ||
+    JSON.stringify(snapshotQueryInput(text, context, now, timezone).previous) !== JSON.stringify(input.previous))
+    throw new Clarification("확인 중인 질문의 원문·기준 시각·조회 문맥이 변경되었습니다. 새로 검색해 주세요.");
+  return { input: structuredClone(input), proof: { slot: structuredClone(continuation.slot), binding: bindSlotAnswer(continuation.request, continuation.slot, continuation.answer) } };
+}
+function attachBinding(spec: RequestSpec, proof: RequestSlotProof) {
+  const { slot, binding } = proof;
+  const fact = spec.evidence.find(item => item.role === "filter" && item.span[0] === slot.span[0] && item.span[1] === slot.span[1] && JSON.stringify(item.value) === JSON.stringify(binding.filter));
+  if (fact) Object.assign(fact, { source_id: "answer", span: [...binding.span], text: binding.text });
+  spec.sources = [{ id: "answer", text: binding.text }];
+  spec.continuation = structuredClone(proof);
+  spec.evidence.push({ id: "slot:binding", source_id: "question", role: "slot", owner: slot.owner, span: [...slot.span], text: slot.text, value: structuredClone(slot) });
+  spec.obligations.push({ id: "slot:binding", kind: "slot", owner: slot.owner, evidence_ids: ["slot:binding"], basis: "explicit" });
+  if (binding.date_expression) spec.date_expression = binding.date_expression;
+  if (slot.kind === "budget_criterion" && spec.selection) spec.selection.currency = binding.currency;
+}
+
 export function requestWorkflow(text: string, now: Date, timezone: string, entity?: QueryPlan["entity"]): NonNullable<RequestSpec["workflow"]> {
   const clean = queryScopeText(text);
   return {
@@ -219,12 +243,16 @@ function planSelection(text: string, source: { typed: ReturnType<typeof queryEvi
 }
 
 // Both inference and direct-plan validation consume the same checked source facts.
-function readPreparedQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace>, capture: (value: ReturnType<typeof queryScopeEvidence>) => void) {
+function readPreparedQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace>, capture: (value: ReturnType<typeof queryScopeEvidence>) => void, continued?: ContinuedInput) {
   trace.outcome = "clarification";
   assertQueryInput(text);
   // Enforce the existing read-only configuration boundary before model interpretation; quoted names stay literal.
   const unquoted = queryScopeText(text);
-  const initialRequest = analyzeQueryAnswerability(text, undefined, context);
+  const proof = continued?.proof;
+  // Only the verified missing phrase is absent from this lexical guard view. The request and evidence retain the original text.
+  const guardText = proof ? text.slice(0, proof.slot.span[0]) + " ".repeat(proof.slot.span[1] - proof.slot.span[0]) + text.slice(proof.slot.span[1]) : text;
+  const guardClean = proof ? queryScopeText(guardText) : unquoted;
+  const initialRequest = analyzeQueryAnswerability(guardText, undefined, context);
   trace.answerability = initialRequest;
   if (initialRequest.status === "unsupported") {
     const reason = initialRequest.reasons.find(item => item.kind === initialRequest.status)!;
@@ -238,10 +266,17 @@ function readPreparedQuery(text: string, context: QueryContext | undefined, now:
   capture(scopeEvidence);
   if (initialRequest.status === "clarification") throw new Clarification(initialRequest.reasons[0].message);
   const numeric = queryLiterals(text, now, timezone);
-  assertLiteralPredicates(text);
-  if (numeric.dates.length && /등록(?:하지|되지)\s*않|등록\s*안/u.test(unquoted))
+  const guardAmounts = proof ? queryLiterals(guardText, now, timezone).amounts : numeric.amounts;
+  if (proof?.slot.kind === "budget_criterion") numeric.amounts = [...new Set([...numeric.amounts, proof.binding.filter.value as string])];
+  if (proof?.slot.kind === "name_value") {
+    numeric.strings = [...new Set([...numeric.strings, proof.binding.filter.value as string])];
+    numeric.quotedStrings = [...new Set([...numeric.quotedStrings, proof.binding.filter.value as string])];
+  }
+  if (proof?.binding.date_expression) numeric.dates.push([proof.binding.date_expression, proof.binding.filter.value as [number, number]]);
+  assertLiteralPredicates(guardText);
+  if (numeric.dates.length && /등록(?:하지|되지)\s*않|등록\s*안/u.test(guardClean))
     throw new Clarification("등록 날짜는 긍정 표현의 날짜 또는 기간으로 지정해 주세요.");
-  const typed = queryEvidence(text, numeric, now, timezone, initialRequest, context?.has_results ? context.entity : undefined);
+  const typed = queryEvidence(text, numeric, now, timezone, initialRequest, context?.has_results ? context.entity : undefined, proof);
   trace.evidence = typed;
   const request = withQueryEvidence(initialRequest, typed);
   trace.answerability = request;
@@ -261,7 +296,7 @@ function readPreparedQuery(text: string, context: QueryContext | undefined, now:
   const evidence = new Set<string>(typed.relevant_fields);
   if (/포함|들어|빠진/u.test(unquoted)) evidence.add("name");
   trace.grounded = { ...trace.grounded, fields: [...evidence] };
-  const amountText = unquoted.replace(/\d{4}[-./]\d{1,2}[-./]\d{1,2}/gu, " ");
+  const amountText = guardClean.replace(/\d{4}[-./]\d{1,2}[-./]\d{1,2}/gu, " ");
   if ((evidence.has("daily") || evidence.has("lifetime")) && /(?:^|[\s이가은는])[-−﹣－]\s*\d/u.test(amountText))
     throw new Clarification("예산은 0 이상의 금액으로 알려주세요.");
   if (evidence.has("created") && numeric.dates.length !== 1 && !/생성일.*종료일|종료일.*생성일/u.test(unquoted))
@@ -270,20 +305,20 @@ function readPreparedQuery(text: string, context: QueryContext | undefined, now:
     throw new Clarification("해당 날짜에 생성된 항목인지 확인해 주세요. 생성 날짜의 조건을 긍정 표현으로 지정해 주세요.");
   if (typed.relevant_fields.includes("id") && !idOperands(text).length)
     throw new Clarification("조회할 원본 ID 값을 지정해 주세요.");
-  if (/이름|명칭/u.test(unquotedAdText(text)) && !numeric.quotedStrings.length &&
-      /(?:이름|명칭)(?:이|가|은|는)?\s*(?:(?:정확히|정확하게|완전히|딱)\s*)?(?:같은|일치하는|동일한)/u.test(unquotedAdText(text)))
+  if (/이름|명칭/u.test(unquotedAdText(guardText)) && !numeric.quotedStrings.length &&
+      /(?:이름|명칭)(?:이|가|은|는)?\s*(?:(?:정확히|정확하게|완전히|딱)\s*)?(?:같은|일치하는|동일한)/u.test(unquotedAdText(guardText)))
     throw new Clarification("비교할 이름 값을 지정해 주세요.");
-  for (const marker of unquoted.matchAll(/일\s*예산|하루\s*예산|총\s*예산|전체\s*예산|예산/gu)) {
-    const clause = unquoted.slice(marker.index + marker[0].length).split(/일\s*예산|하루\s*예산|총\s*예산|전체\s*예산|종료일|이름|명칭|상태|생성|원본\s*ID|\bID\b|아이디/iu)[0];
-    const before = unquoted.slice(0, marker.index);
+  for (const marker of guardClean.matchAll(/일\s*예산|하루\s*예산|총\s*예산|전체\s*예산|예산/gu)) {
+    const clause = guardClean.slice(marker.index + marker[0].length).split(/일\s*예산|하루\s*예산|총\s*예산|전체\s*예산|종료일|이름|명칭|상태|생성|원본\s*ID|\bID\b|아이디/iu)[0];
+    const before = guardClean.slice(0, marker.index);
     const precedingOperand = /보다\s*$/u.test(before) && queryLiterals(before, now, timezone).amounts.length === 1;
     if (!precedingOperand && !queryLiterals(clause, now, timezone).amounts.length && /이상|이하|초과|미만|(?:높|낮|크|작|적|많)은|넘는|보다/u.test(clause))
       throw new Clarification("예산을 비교할 기준 금액을 지정해 주세요.");
   }
-  if ((/예산/u.test(unquoted) && !numeric.amounts.length && /큰|높은|낮|적은|적게|과다|조금|저렴|지나친|적정|넉넉|많이|평균적인|기준보다|기준\s*금액|얼마\s*미만/u.test(unquoted)) ||
-      (/이름|명칭/u.test(unquotedAdText(text)) && /아직|나중에|다음에|미정|비워|모르겠|무엇이|(?:그|이)\s*(?:단어|문구)|해당\s*문구|지정할\s*문구/u.test(unquotedAdText(text)) && !numeric.quotedStrings.length) ||
-      /(?:이름|명칭).*(?:특정\s*(?:단어|문구)|검색어|어떤\s*(?:단어|문구))/u.test(unquotedAdText(text)) && !numeric.quotedStrings.length ||
-      /일예산인지.*(?:전체|총)\s*예산인지|예산\s*종류(?:가|는)?\s*다른|금액\s*단위는\s*빠졌/u.test(unquoted))
+  if ((/예산/u.test(guardClean) && !guardAmounts.length && /큰|높은|낮|적은|적게|과다|조금|저렴|지나친|적정|넉넉|많이|평균적인|기준보다|기준\s*금액|얼마\s*미만/u.test(guardClean)) ||
+      (/이름|명칭/u.test(unquotedAdText(guardText)) && /아직|나중에|다음에|미정|비워|모르겠|무엇이|(?:그|이)\s*(?:단어|문구)|해당\s*문구|지정할\s*문구/u.test(unquotedAdText(guardText)) && !numeric.quotedStrings.length) ||
+      /(?:이름|명칭).*(?:특정\s*(?:단어|문구)|검색어|어떤\s*(?:단어|문구))/u.test(unquotedAdText(guardText)) && !numeric.quotedStrings.length ||
+      /일예산인지.*(?:전체|총)\s*예산인지|예산\s*종류(?:가|는)?\s*다른|금액\s*단위는\s*빠졌/u.test(guardClean))
     throw new Clarification("비교할 값과 항목을 구체적으로 알려주세요.");
   const scopeEntity = literalScope.entity ?? (literalScope.reference && context?.has_results ? literalScope.reference === "children" ? childEntity(context.entity) : context.entity as QueryPlan["entity"] : undefined);
   const scopedPlatforms = literalScope.platforms.length ? literalScope.platforms : literalScope.reference && context?.has_results ? context.platforms : [];
@@ -303,18 +338,19 @@ function readPreparedQuery(text: string, context: QueryContext | undefined, now:
   if (clauses.length) trace.grounded.request_clauses = clauses;
   if (!modelFields.length && queryPlanRemainder(typed.residual, request.operation, request.semantic))
     throw new Clarification("해석하지 못한 추가 조건이 있습니다. 적용할 조건을 나누어 구체적으로 알려주세요.");
-  const spec = projectPreparedRequest(snapshotQueryInput(text, context, now, timezone), { typed, request, literalScope, scopeEntity, products, modelFields, clauses, scope_roles: scopeEvidence.roles });
+  const spec = projectPreparedRequest(continued?.input ?? snapshotQueryInput(text, context, now, timezone), { typed, request, literalScope, scopeEntity, products, modelFields, clauses, scope_roles: scopeEvidence.roles });
   spec.selection = planSelection(text, { typed, numeric, request, evidence, modelFields, unquoted });
   spec.workflow = requestWorkflow(text, now, timezone, literalScope.entity);
   if (request.operation && ["audit", "policy", "history", "create_rule"].includes(request.operation)) {
     spec.evidence.push({id:"workflow:options", source_id:"question", role:"workflow", owner:null, span:[0,text.length], text, value:structuredClone(spec.workflow)});
     spec.obligations.push({id:"workflow:options", kind:"workflow", owner:null, evidence_ids:["workflow:options"], basis:"explicit"});
   }
+  if (proof) attachBinding(spec, proof);
   return { unquoted, numeric, typed, request, evidence, literalScope, scopeEntity, products, modelFields, spec };
 }
 export type PreparedQuery = ReturnType<typeof readPreparedQuery>;
-export function preprocessQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace> = {}): PreparedQuery {
-  return readPreparedQuery(text, context, now, timezone, trace, () => {});
+export function preprocessQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace> = {}, continuation?: RequestContinuation): PreparedQuery {
+  return readPreparedQuery(text, context, now, timezone, trace, () => {}, continuation ? continuedInput(text, context, now, timezone, continuation) : undefined);
 }
 
 export type RequestPreparation =
@@ -322,10 +358,13 @@ export type RequestPreparation =
   | { kind: "rejected"; error: Clarification; spec: RequestSpec };
 
 /** Rejected requests retain their source and unresolved obligations; they never become executable plans. */
-export function prepareRequest(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace> = {}): RequestPreparation {
+export function prepareRequest(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace> = {}, continuation?: RequestContinuation): RequestPreparation {
   let scopeEvidence: ReturnType<typeof queryScopeEvidence> | undefined;
+  let continued: ContinuedInput | undefined;
+  if (continuation) trace.outcome = "clarification";
   try {
-    const prepared = readPreparedQuery(text, context, now, timezone, trace, value => { scopeEvidence = value; });
+    continued = continuation ? continuedInput(text, context, now, timezone, continuation) : undefined;
+    const prepared = readPreparedQuery(text, context, now, timezone, trace, value => { scopeEvidence = value; }, continued);
     return { kind: "prepared", prepared, spec: prepared.spec };
   } catch (error) {
     if (!(error instanceof Clarification)) throw error;
@@ -333,12 +372,13 @@ export function prepareRequest(text: string, context: QueryContext | undefined, 
     const request: QueryAnswerability = trace.answerability ?? { status: "clarification", reasons: [], operations: [], data_requirements: [] };
     const typed: ReturnType<typeof queryEvidence> = trace.evidence ?? { filters: [], relevant_fields: [], logical_operator: undefined, complete: false,
       unresolved: [], ambiguities: [], residual: text, logic_evidence: [] };
-    const spec = projectPreparedRequest(snapshotQueryInput(text, context, now, timezone), {
+    const spec = projectPreparedRequest(continued?.input ?? snapshotQueryInput(text, context, now, timezone), {
       typed, request, literalScope, scopeEntity: literalScope.entity, products: [], modelFields: [],
       clauses: scopeEvidence?.clauses ?? [], scope_roles: scopeEvidence?.roles,
     });
     spec.state = trace.outcome === "unsupported" ? "unsupported" : "needs_clarification";
     spec.issues = request.reasons.length ? structuredClone(request.reasons) : [{ code: trace.capability_guard ?? "input_contract", kind: "clarification", message: error.message }];
+    if (continued) attachBinding(spec, continued.proof);
     return { kind: "rejected", error, spec };
   }
 }

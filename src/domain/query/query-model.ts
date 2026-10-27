@@ -1,3 +1,4 @@
+import type { RequestContinuation } from "./query-clarification";
 import type { ChoiceQuestion } from "../../browser/model/types";
 import { ACTIVE, INACTIVE, Clarification, type Query, type QueryContext } from "./query";
 
@@ -5,7 +6,7 @@ import { literalListOperation } from "./query-scope";
 import type { analyzeQueryEvidence } from "./query-evidence";
 import { explicitReadRequest } from "./query-language";
 import { analyzeQueryAnswerability, type QueryAnswerability } from "./query-answerability";
-import { prepareRequest, boundNameOperand, exactNameRequested, budgetCurrency, type PreparedQuery } from "./query-preparation";
+import { prepareRequest, boundNameOperand, exactNameRequested, type PreparedQuery } from "./query-preparation";
 import { fieldPaths, type QueryPlan } from "./query-contract";
 export { queryPlanSchema, type QueryPlan } from "./query-contract";
 export { queryLiterals } from "./query-preparation";
@@ -66,8 +67,12 @@ const required = (selected: Record<string, Choice>, id: string) => {
   if (!label || label === "unknown") throw new Clarification("질문의 조건을 확인하지 못했습니다.");
   return label;
 };
-export async function interpretQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, choose: Choose, modelVersion: () => string) {
+export async function interpretQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, choose: Choose, modelVersion: () => string, continuation?: RequestContinuation) {
   const trace: QueryTrace = { source: "laya", version: QUERY_PLAN_VERSION, model_version: modelVersion(), outcome: "uncertain", decisions: {}, stage: "input", grounded: {} };
+  const finishTrace = () => {
+    if (continuation) { delete trace.evidence; if (trace.grounded) delete trace.grounded.filters; }
+    return trace;
+  };
   const select = (answers: Record<string, Choice>, id: string) => {
     if (!answers[id]?.label || answers[id]?.label === "unknown") trace.failed_decision = id;
     try { return required(answers, id); }
@@ -86,7 +91,7 @@ export async function interpretQuery(text: string, context: QueryContext | undef
   };
   let activeRequest: RequestSpec | undefined;
   try {
-    const preparation = prepareRequest(text, context, now, timezone, trace);
+    const preparation = prepareRequest(text, context, now, timezone, trace, continuation);
     activeRequest = preparation.spec;
     if (preparation.kind === "rejected") throw preparation.error;
     const prepared = preparation.prepared;
@@ -102,7 +107,7 @@ export async function interpretQuery(text: string, context: QueryContext | undef
         const finished = finishQuery({ platforms: literalScope.platforms, entity: scopeEntity, operation,
           filters: [{ field, operator, value: numeric.amounts[0] }], logical_operator: "AND", previous: false, children: false, semantic: null, currency: null }, prepared, context);
         trace.source = "deterministic_literal"; trace.preflight = "literal_budget"; trace.plan = finished.query; trace.outcome = "query"; trace.stage = "complete";
-        return { ...finished, trace };
+        return { ...finished, trace: finishTrace() };
       }
     }
     const literalOperation = literalListOperation(text);
@@ -112,7 +117,7 @@ export async function interpretQuery(text: string, context: QueryContext | undef
       trace.source = "deterministic_literal";
       trace.preflight = literalOperation === "count" ? "literal_count" : "literal_list";
       trace.plan = finished.query; trace.outcome = "query"; trace.stage = "complete";
-      return { ...finished, trace };
+      return { ...finished, trace: finishTrace() };
     }
     trace.outcome = "uncertain";
     const completeEvidence = typed.complete && !!scopeEntity;
@@ -192,7 +197,7 @@ export async function interpretQuery(text: string, context: QueryContext | undef
       }
     }
     if (plan.filters.some(f => f.field.startsWith("budget.") && !["is_empty", "is_not_empty"].includes(f.operator))) {
-      plan.currency = budgetCurrency(unquoted);
+      plan.currency = prepared.spec.selection!.currency;
       trace.grounded!.currency = plan.currency;
     }
     if (plan.filters.length > 1 && typed.logical_operator && completeEvidence) {
@@ -222,7 +227,7 @@ export async function interpretQuery(text: string, context: QueryContext | undef
     trace.stage = "complete";
     if (!call) { trace.source = "deterministic_literal"; trace.preflight = "typed_evidence"; }
     trace.model_version = modelVersion();
-    return { ...finished, trace };
+    return { ...finished, trace: finishTrace() };
   } catch (error) {
     trace.model_version = modelVersion();
     if (error instanceof Clarification && !call && trace.stage === "input" && (trace.outcome === "clarification" || trace.outcome === "unsupported")) {
@@ -231,6 +236,6 @@ export async function interpretQuery(text: string, context: QueryContext | undef
         reasons: trace.answerability?.reasons.length ? trace.answerability.reasons : [reason] };
     }
     if (!(error instanceof Clarification)) trace.outcome = "inference";
-    throw new QueryModelError(error instanceof Clarification ? error.message : "모델에서 조회 조건을 확인하지 못했습니다. 다시 시도해 주세요.", trace, activeRequest);
+    throw new QueryModelError(error instanceof Clarification ? error.message : "모델에서 조회 조건을 확인하지 못했습니다. 다시 시도해 주세요.", finishTrace(), activeRequest);
   }
 }

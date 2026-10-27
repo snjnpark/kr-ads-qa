@@ -14,12 +14,25 @@ import { loadPolicy } from "../domain/policies/schema";
 import { customRuleResults } from "../domain/policies/evaluation";
 
 import { auditRulesSchema } from "../lib/audit-rules";
-import { emptyContext, type QueryContext } from "../domain/query/query";
+import { Clarification, emptyContext, type QueryContext } from "../domain/query/query";
+import { bindSlotAnswer, proposeSlot, type MissingSlot } from "../domain/query/query-clarification";
+import type { RequestSpec } from "../domain/query/query-request";
+import type { Scope } from "../contracts/domain";
+import { scopeKey } from "../domain/scope";
 import { RuleBuilder, type RuleDraft } from "./rules";
 
+type PendingRequest = {
+  request_id: string;
+  request: RequestSpec;
+  slot: MissingSlot;
+  scope: Scope;
+  context: QueryContext;
+  data_generation: string;
+};
 type TabSession = {
   context: QueryContext;
   draft: RuleDraft | null;
+  pending: PendingRequest | null;
   touched: number;
 };
 type BrowserSession = {
@@ -52,9 +65,9 @@ export function createApi(
       : Promise.resolve(application);
   const invalidateContexts = (activeTab: TabSession) => {
     for (const storedSession of sessions.values()) for (const storedTab of storedSession.tabs.values()) {
-      storedTab.context = emptyContext(); storedTab.draft = null;
+      storedTab.context = emptyContext(); storedTab.draft = null; storedTab.pending = null;
     }
-    activeTab.context = emptyContext(); activeTab.draft = null;
+    activeTab.context = emptyContext(); activeTab.draft = null; activeTab.pending = null;
   };
   return async function handle(request: Request): Promise<Response> {
     let fresh: string | undefined;
@@ -104,7 +117,7 @@ export function createApi(
           session.tabs.delete(
             [...session.tabs].sort((a, b) => a[1].touched - b[1].touched)[0][0],
           );
-        tab = { context: emptyContext(), draft: null, touched: time };
+        tab = { context: emptyContext(), draft: null, pending: null, touched: time };
         session.tabs.set(tabId, tab);
       }
       tab.touched = time;
@@ -124,13 +137,13 @@ export function createApi(
       const activeTab = tab;
       const response = await service.mutex.run(async () => {
         service.assertAvailable();
-        let previousContext = structuredClone(activeTab.context), previousDraft = structuredClone(activeTab.draft);
+        let previousContext = structuredClone(activeTab.context), previousDraft = structuredClone(activeTab.draft), previousPending = structuredClone(activeTab.pending);
         try { const result = await service.storage.atomic(async () => {
         setOperationSignal(request.signal);
         if (service.hydratedRevision !== service.storage.revision || (contextRevision !== undefined && contextRevision !== service.storage.revision)) {
           await service.initialize();
           invalidateContexts(activeTab);
-          previousContext = structuredClone(activeTab.context); previousDraft = null;
+          previousContext = structuredClone(activeTab.context); previousDraft = null; previousPending = null;
         }
         if (method === "GET" && path === "/session") return json({ csrf_token: session.csrf });
         if (method === "GET" && path === "/state") {
@@ -163,17 +176,47 @@ export function createApi(
             throw new ApiError(409, "검사 항목이 변경되었습니다. 최신 설정을 다시 불러와 주세요.");
           return json(service.policies.saveAuditRules(configuration));
         }
+        if (method === "DELETE" && path === "/ask") {
+          const input = parsed(z.strictObject({ request_id: z.string().min(1).max(128).optional() }), body);
+          if (!input.request_id || activeTab.pending?.request_id === input.request_id) activeTab.pending = null;
+          return json({ rows: [], status: "REVIEW", query_state: "needs_clarification", message: "확인 질문을 종료했습니다." });
+        }
         if (method === "POST" && path === "/ask") {
           const input = parsed(
             z.strictObject({
               ...scopeShape,
               text: z.string().trim().min(1).max(2000),
+              clarification: z.strictObject({ request_id: z.string().min(1).max(128), slot_id: z.string().min(1).max(160) }).optional(),
             }),
             body,
           );
-          return json(
-            await service.ask(input.text, tab.context, validateScope(input)),
-          );
+          const scope = validateScope(input);
+          const clarify = (pending: PendingRequest) => ({ request_id: pending.request_id, slot_id: pending.slot.id, kind: pending.slot.kind, prompt: pending.slot.prompt });
+          if (input.clarification) {
+            const pending = activeTab.pending;
+            if (!pending || pending.request_id !== input.clarification.request_id || pending.slot.id !== input.clarification.slot_id)
+              throw new ApiError(409, "확인 질문이 변경되었거나 만료되었습니다. 새로 검색해 주세요.");
+            if (scopeKey(scope) !== scopeKey(pending.scope) || pending.data_generation !== service.collectionGeneration || pending.request.input.timezone !== service.settings.timezone || JSON.stringify(pending.context) !== JSON.stringify(activeTab.context)) {
+              activeTab.pending = null;
+              return json({ rows: [], status: "REVIEW", query_state: "needs_clarification", message: "조회 범위·광고 자료 또는 이전 결과가 변경되었습니다. 원래 질문부터 다시 검색해 주세요." });
+            }
+            try { bindSlotAnswer(pending.request, pending.slot, input.text); }
+            catch (error) {
+              if (!(error instanceof Clarification)) throw error;
+              return json({ rows: [], status: "REVIEW", query_state: "needs_clarification", message: error.message, clarification: clarify(pending) });
+            }
+            const response = await service.ask(pending.request.input.text, activeTab.context, scope, { continuation: { request: pending.request, slot: pending.slot, answer: input.text } });
+            if (response.query_state !== "error") activeTab.pending = null;
+            return json(response);
+          }
+          activeTab.pending = null;
+          const response = await service.ask(input.text, activeTab.context, scope, { onClarification: request => {
+            const snapshot = structuredClone(request);
+            snapshot.input.scope = structuredClone(scope);
+            const slot = proposeSlot(snapshot);
+            if (slot) activeTab.pending = { request_id: randomBytes(18).toString("base64url"), request: snapshot, slot, scope: structuredClone(scope), context: structuredClone(activeTab.context), data_generation: service.collectionGeneration };
+          } });
+          return json(activeTab.pending && response.query_state === "needs_clarification" ? { ...response, clarification: clarify(activeTab.pending) } : response);
         }
         if (method === "POST" && path === "/audit") {
           const input = parsed(
@@ -513,7 +556,7 @@ export function createApi(
           contextRevision = service.storage.revision;
           return result;
         } catch (error) {
-          activeTab.context = previousContext; activeTab.draft = previousDraft;
+          activeTab.context = previousContext; activeTab.draft = previousDraft; activeTab.pending = previousPending;
           await service.storage.reload();
           if (contextRevision !== undefined && contextRevision !== service.storage.revision) invalidateContexts(activeTab);
           await service.initialize();

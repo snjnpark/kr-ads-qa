@@ -1,3 +1,4 @@
+import type { RequestContinuation } from "../../domain/query/query-clarification";
 import type { QueryTrace } from "../../domain/query/query-model";
 import type { RequestSpec } from "../../domain/query/query-request";
 import type { QueryContext } from "../../domain/query/query";
@@ -6,7 +7,7 @@ import type { ModelProgress } from "./types";
 export type EngineSettings = { threshold?: number; margin?: number; batchSize?: number; baseUrl?: string };
 export type WorkerRequest =
   | { id: number; method: "load"; settings: EngineSettings; files?: File[] }
-  | { id: number; method: "parseQuery"; args: [string, QueryContext | undefined, Date, string]; settings: EngineSettings }
+  | { id: number; method: "parseQuery"; args: [string, QueryContext | undefined, Date, string, RequestContinuation?]; settings: EngineSettings }
   | { id: number; method: "classify"; args: [string]; settings: EngineSettings }
   | { id: number; method: "judgeBatch"; args: [SemanticInput[], string]; settings: EngineSettings };
 export type WorkerResponse =

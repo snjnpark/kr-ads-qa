@@ -1,5 +1,6 @@
 import { z } from "../lib/validation";
 import { auditRulesSchema } from "../lib/audit-rules";
+import { PLATFORMS } from "./domain";
 
 const fieldState = z.enum([
   "PRESENT",
@@ -58,6 +59,29 @@ const dataRow = z.looseObject({
   reason: z.string().optional(),
   semantic: semanticDecision.optional(),
 });
+const queryClarification = z.strictObject({
+  request_id: z.string().min(1).max(100),
+  slot_id: z.string().min(1).max(100),
+  kind: z.enum(["budget_criterion", "name_value", "creation_period"]),
+  prompt: z.string().min(1).max(2000),
+});
+const executionSteps = ["scope", "previous", "children", "filter", "semantic", "workflow", "result"] as const;
+const queryEvidence = z.strictObject({
+  operation: z.enum(["find", "count", "compare", "audit", "policy", "history", "create_rule"]),
+  entity: z.enum(["campaign", "adgroup", "ad", "creative", "keyword", "asset_group"]),
+  scope: z.strictObject({
+    platforms: z.array(z.enum(PLATFORMS)).max(PLATFORMS.length).optional(),
+    accounts: z.array(z.string().min(1).max(250).refine(value => !!value.trim() && !/[\r\n\0]/u.test(value))).max(500).optional(),
+    products: z.array(z.string().regex(/^(?:naver|kakao|kakao_keyword|google):[A-Z][A-Z0-9_]*$/u)).max(100).optional(),
+  }),
+  data_generation: z.string().min(1).max(100),
+  collected_at: z.string().min(1).refine(value => Number.isFinite(Date.parse(value))).nullable(),
+  complete: z.boolean(),
+  count: z.number().int().nonnegative(),
+  unknown_count: z.number().int().nonnegative(),
+  displayed_count: z.number().int().nonnegative(),
+  steps: z.array(z.enum(executionSteps)).min(2).max(executionSteps.length),
+});
 const searchResult = z
   .looseObject({
     message: z.string(),
@@ -78,6 +102,9 @@ const searchResult = z
     count: z.number().int().nonnegative().optional(),
     unknown_count: z.number().int().nonnegative().optional(),
     semantic_decisions: z.record(z.string(), semanticDecision).optional(),
+    query_state: z.enum(["completed", "needs_clarification", "unsupported", "error"]).optional(),
+    clarification: queryClarification.optional(),
+    evidence_result: queryEvidence.optional(),
   })
   .superRefine((value, context) => {
     const keys = value.rows.map((row) => row.key);
@@ -89,6 +116,23 @@ const searchResult = z
         code: "custom",
         message: "결과 개수와 행 식별자가 일치하지 않습니다.",
       });
+    const evidence = value.evidence_result;
+    if ((value.query_state === "completed") !== !!evidence ||
+      (value.clarification && value.query_state !== "needs_clarification") ||
+      (value.query_state && value.query_state !== "completed" &&
+        (keys.length > 0 || (value.count ?? 0) !== 0 || (value.unknown_count ?? 0) !== 0 || Object.keys(value.semantic_decisions ?? {}).length > 0 ||
+          (value.status !== undefined && value.status !== "REVIEW"))))
+      context.addIssue({ code: "custom", message: "질문의 확인 상태와 실행 결과가 일치하지 않습니다." });
+    if (evidence && (evidence.displayed_count !== keys.length || evidence.count < evidence.displayed_count ||
+      (value.count !== undefined && evidence.count !== value.count) ||
+      (value.unknown_count !== undefined && evidence.unknown_count !== value.unknown_count) ||
+      evidence.steps[0] !== "scope" || evidence.steps.at(-1) !== "result" ||
+      evidence.steps.some((step, index) => index > 0 && executionSteps.indexOf(step) <= executionSteps.indexOf(evidence.steps[index - 1])) ||
+      (evidence.steps.includes("children") && !evidence.steps.includes("previous")) ||
+      evidence.steps.includes("workflow") !== ["audit", "policy", "history", "create_rule"].includes(evidence.operation) ||
+      (!evidence.complete && value.status === "PASS") ||
+      Object.values(evidence.scope).some(values => values !== undefined && new Set(values).size !== values.length)))
+      context.addIssue({ code: "custom", message: "실행 근거와 표시 결과가 일치하지 않습니다." });
     for (const [key, decision] of Object.entries(
       value.semantic_decisions ?? {},
     )) {

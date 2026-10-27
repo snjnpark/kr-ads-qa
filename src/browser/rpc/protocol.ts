@@ -30,6 +30,7 @@ const sensitiveKeys = new Set(
   ].map((key) => key.toLowerCase().replace(/[^a-z0-9]/g, "")),
 );
 export function publicData(value: unknown): unknown {
+  if (value instanceof Date) return value.toJSON();
   if (Array.isArray(value)) return value.map(publicData);
   if (value !== null && typeof value === "object")
     return Object.fromEntries(

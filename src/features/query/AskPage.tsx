@@ -12,7 +12,7 @@ import { HistoryResults } from "@/features/history/HistoryResults";
 import { Notice } from "@/components/secondary/WorkspaceParts";
 import { api } from "@/lib/api";
 import { semanticOutcome, unknownResultTitle } from "@/lib/evidence";
-import type { AppState, DataRow, Result, Scope } from "@/contracts/api";
+import type { AppState, AskRequest, DataRow, QueryClarification, Result, Scope } from "@/contracts/api";
 
 import { WorkingState } from "@/components/WorkingState";
 
@@ -48,25 +48,46 @@ export function AskPage({
   active?: boolean;
 }) {
   const [text, setText] = useState(preset);
+  const [answerText, setAnswerText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<Result | null>(null);
   const [row, setRow] = useState<DataRow | null>(null);
   const [showMeaning, setShowMeaning] = useState(false);
   const [submitted, setSubmitted] = useState("");
+  const [clarification, setClarification] = useState<QueryClarification | null>(null);
+  const inputText = clarification ? answerText : text;
   const [resultKey, setResultKey] = useState(0);
   const sequence = useRef(0);
   const controller = useRef<AbortController | null>(null);
+  const clarificationRef = useRef<QueryClarification | null>(null);
+  const clearing = useRef<Promise<unknown> | null>(null);
   const input = useRef<HTMLTextAreaElement | null>(null);
   const scopeKey = JSON.stringify(scope);
+  function updateClarification(value: QueryClarification | null) {
+    clarificationRef.current = value;
+    setClarification(value);
+  }
+  function releaseClarification() {
+    const requestId = clarificationRef.current?.request_id;
+    if (!requestId && !controller.current) return;
+    clarificationRef.current = null;
+    clearing.current = (clearing.current ?? Promise.resolve()).then(() => api<Result>("/ask", {
+      method: "DELETE", body: requestId ? { request_id: requestId } : {},
+    })).catch(() => undefined);
+  }
   useEffect(() => {
     sequence.current++;
     controller.current?.abort();
+    releaseClarification();
+    controller.current = null;
     setText(preset);
+    setAnswerText("");
     setResult(null);
     setRow(null);
     setShowMeaning(false);
     setSubmitted("");
+    updateClarification(null);
     setError("");
     setBusy(false);
   }, [preset, presetVersion]);
@@ -77,12 +98,19 @@ export function AskPage({
     }
   }, [active]);
   useEffect(() => {
+    if (clarification && active) input.current?.focus();
+  }, [clarification, active]);
+  useEffect(() => {
     sequence.current++;
     controller.current?.abort();
+    releaseClarification();
+    controller.current = null;
     setResult(null);
     setRow(null);
     setShowMeaning(false);
     setSubmitted("");
+    setAnswerText("");
+    updateClarification(null);
     setError("");
     setBusy(false);
     return () => {
@@ -93,8 +121,11 @@ export function AskPage({
   function resetSearch() {
     sequence.current++;
     controller.current?.abort();
+    releaseClarification();
     setText("");
+    setAnswerText("");
     setSubmitted("");
+    updateClarification(null);
     setResult(null);
     setRow(null);
     setShowMeaning(false);
@@ -103,12 +134,15 @@ export function AskPage({
     input.current?.focus();
   }
   function useQuestion(question: string) {
+    releaseClarification();
+    updateClarification(null);
+    setAnswerText("");
     setText(question);
     input.current?.focus();
   }
   async function search() {
     // The controller ref locks immediately, before React publishes the busy state.
-    if (!text.trim() || busy || (controller.current && !controller.current.signal.aborted)) return;
+    if (!inputText.trim() || busy || (controller.current && !controller.current.signal.aborted)) return;
     const request = ++sequence.current;
     controller.current?.abort();
     const pending = new AbortController();
@@ -118,17 +152,28 @@ export function AskPage({
     setResult(null);
     setRow(null);
     setShowMeaning(false);
-    setSubmitted(text.trim());
+    if (!clarification) setSubmitted(text.trim());
+    const body: AskRequest = { text: inputText.trim(), ...scope,
+      ...(clarification ? { clarification: { request_id: clarification.request_id, slot_id: clarification.slot_id } } : {}) };
     try {
+      await clearing.current;
+      if (sequence.current !== request || pending.signal.aborted) return;
       const data = await api<Result>("/ask", {
         method: "POST",
-        body: { text: text.trim(), ...scope },
+        body,
         signal: pending.signal,
       });
       if (sequence.current === request) {
         setResult(data);
         setResultKey(request);
-        onRefresh();
+        if (data.query_state === "error") setError(data.message);
+        else updateClarification(data.clarification ?? null);
+        if (data.clarification && !clarification) setAnswerText("");
+        if (data.clarification && clarification) setError(data.message);
+        if (data.query_state === "completed") {
+          if (clarification) { setText(""); setAnswerText(""); }
+          onRefresh();
+        }
       }
     } catch (error) {
       if (sequence.current === request) setError((error as Error).message);
@@ -196,13 +241,13 @@ export function AskPage({
           <Search className="search-form-icon" size={20} aria-hidden="true" />
           <Textarea
             ref={input}
-            aria-label="광고 설정 질문"
-            aria-describedby="search-keyboard-hint"
+            aria-label={clarification ? "조건 확인 답변" : "광고 설정 질문"}
+            aria-describedby={clarification ? "search-clarification-prompt search-keyboard-hint" : "search-keyboard-hint"}
             rows={1}
             maxLength={2000}
-            placeholder="광고 설정에 대해 질문하세요"
-            value={text}
-            onChange={(event) => setText(event.target.value)}
+            placeholder={clarification ? clarification.kind === "budget_criterion" ? "예: 3만 원 이상" : clarification.kind === "name_value" ? "예: '봄'" : "예: 오늘, 지난주, 2026-10-20" : "광고 설정에 대해 질문하세요"}
+            value={inputText}
+            onChange={(event) => clarification ? setAnswerText(event.target.value) : setText(event.target.value)}
             onKeyDown={(event) => {
               if (
                 event.key === "Enter" &&
@@ -215,14 +260,14 @@ export function AskPage({
               }
             }}
           />
-          {text.length > 0 && !busy && (
+          {inputText.length > 0 && !busy && (
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
               className="search-clear"
-              aria-label="질문 지우기"
-              onClick={() => useQuestion("")}
+              aria-label={clarification ? "답변 지우기" : "질문 지우기"}
+              onClick={() => { if (clarification) setAnswerText(""); else setText(""); input.current?.focus(); }}
             >
               <X />
             </Button>
@@ -231,15 +276,15 @@ export function AskPage({
             type="submit"
             size="icon"
             className="search-submit"
-            aria-label="설정 검색"
-            disabled={busy || !text.trim()}
+            aria-label={clarification ? "조건 확인" : "설정 검색"}
+            disabled={busy || !inputText.trim()}
           >
             {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
           </Button>
         </form>
         <div className="search-hint" id="search-keyboard-hint">
           <span className="keyboard-hint">
-            Enter로 검색 · Shift + Enter로 줄바꿈
+            {clarification ? "Enter로 답변 · Shift + Enter로 줄바꿈" : "Enter로 검색 · Shift + Enter로 줄바꿈"}
           </span>
         </div>
         {!submitted && (
@@ -266,8 +311,16 @@ export function AskPage({
       </div>
       <div className="search-results">
         <InlineError message={error} />
-        {busy && <WorkingState text="광고 설정을 검색하고 있습니다" />}
-        {result && (
+        {clarification && (
+          <div className="query-summary">
+            <div>
+              <h2>{submitted}</h2>
+              <p id="search-clarification-prompt" role="status">{clarification.prompt}</p>
+            </div>
+          </div>
+        )}
+        {busy && <WorkingState text={clarification ? "조건을 확인하고 있습니다" : "광고 설정을 검색하고 있습니다"} />}
+        {result && !clarification && (
           <>
             <div className="query-summary">
               <div>
@@ -293,7 +346,7 @@ export function AskPage({
                 일부 설정을 조회하지 못했습니다. 조회 범위와 계정 연결을 확인하세요.
               </Notice>
             )}
-            {result.result_type === "history" ? (
+            {result.query_state && result.query_state !== "completed" ? null : result.result_type === "history" ? (
               result.rows.length > 0 && (
                 <HistoryResults report={result} native={false} onDetails={setRow} />
               )

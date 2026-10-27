@@ -1,4 +1,4 @@
-import { excludedAdProduct, performanceMetricText, precedingQuotedName, queryScopeText } from "../../lib/ad-products";
+import { excludedAdProduct, missingNameOperand, performanceMetricText, precedingQuotedName, queryScopeText } from "../../lib/ad-products";
 import type { QueryContext } from "./query";
 import type { QueryPlan } from "./query-model";
 import { queryLiteralScope, queryRequestRemainder } from "./query-scope";
@@ -138,7 +138,7 @@ export function analyzeQueryAnswerability(text: string, evidence?: Evidence, con
     add("unsupported_configuration_field", "기기·지역·입찰·심사 조건은 현재 조회에서 지원하지 않습니다.", "unsupported", "unsupported_condition");
   if (/(?:타겟(?:팅)?\s*)?(?:국가|나라)(?:\s*(?:코드|설정))?(?=$|[\s:：=]|이|가|은|는|을|를|로|에|만)|(?:랜딩|도착|연결|최종|목적지)\s*(?:URL|주소)|\bURL(?=$|[\s:：=]|에|이|가|은|는|을|로|만)/iu.test(clean))
     add("unrepresentable_filter_field", "국가·랜딩 URL 조건은 현재 검색에서 지원하지 않습니다. 해당 조건을 생략해서 조회할 수 없습니다.", "unsupported", "unsupported_condition");
-  if ([...clean.matchAll(/(?:이름|명칭)(?:에서|에)/gu)].some(match => !precedingQuotedName.test(text.slice(0, match.index)) && /^\s*(?:들어간|들어\s*있|포함된|포함되어|포함\s*안\s*된|없는|제외된)/u.test(text.slice(match.index + match[0].length))))
+  if ([...clean.matchAll(/(?:이름|명칭)(?:에서|에)/gu)].some(match => !precedingQuotedName.test(text.slice(0, match.index)) && missingNameOperand(text.slice(match.index + match[0].length))))
     add("missing_name_operand", "이름에 포함하거나 제외할 문자열을 지정해 주세요.", "clarification");
   const domain = /예산|종료|상태|이름|명칭|\bID\b|아이디|광고|캠페인|소재|키워드|애셋|에셋|매체|메타|페이스북|인스타그램|네이버|카카오|구글|\b(?:meta|google|naver|kakao|PMax)\b|그\s*중|이\s*중|방금|아까|이전\s*결과|해당\s*결과/iu.test(clean);
   if (!domain && !operations.length && !reference)

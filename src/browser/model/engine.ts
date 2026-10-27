@@ -1,3 +1,4 @@
+import type { RequestContinuation } from "../../domain/query/query-clarification";
 import type { QueryContext } from "../../domain/query/query";
 import { QueryModelError, type interpretQuery } from "../../domain/query/query-model";
 import { MODEL_RELEASE, MODEL_TOTAL_BYTES } from "./cache";
@@ -78,7 +79,7 @@ export class BrowserLayaEngine {
     if (!files.length) throw new Error("검증할 모델 폴더를 선택해 주세요.");
     this.cancel(); return this.request<{ model_version: string }>({ method: "load", files });
   }
-  parseQuery(text: string, context?: QueryContext, now = new Date(), timezone = "Asia/Seoul") { return this.request<Awaited<ReturnType<typeof interpretQuery>>>({ method: "parseQuery", args: [text, context, now, timezone] }); }
+  parseQuery(text: string, context?: QueryContext, now = new Date(), timezone = "Asia/Seoul", continuation?: RequestContinuation) { return this.request<Awaited<ReturnType<typeof interpretQuery>>>({ method: "parseQuery", args: continuation ? [text, context, now, timezone, continuation] : [text, context, now, timezone] }); }
   classify(text: string) { return this.request<Decision>({ method: "classify", args: [text] }); }
   judgeBatch(items: SemanticInput[], question: string) { return this.request<Decision[]>({ method: "judgeBatch", args: [items, question] }); }
 }

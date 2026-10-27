@@ -1,5 +1,5 @@
 import type { QueryPlan } from "./query-model";
-import { queryScopeText, stripAdProductMentions } from "../../lib/ad-products";
+import { queryScopeText, missingNameOperand, stripAdProductMentions } from "../../lib/ad-products";
 import { ACTIVE, INACTIVE } from "./query";
 import { composedComparisonForms, quantifiedLogicForms, requestPhraseLength, settingPrefixLength, settingPresenceForms, workflowPhraseLength } from "./query-language";
 
@@ -97,6 +97,7 @@ function nameMatch(clause: string, allowBare = false) {
   const wrapper = /^(?:(?:대조하면|대조했을\s*때|확인하면|비교하면)\s*)?/u.exec(clause.slice(initial.length))![0];
   const start = initial.length + wrapper.length;
   const quotedOperand = /^(?:"([^"]+)"|'([^']+)'|“([^”]+)”|‘([^’]+)’|`([^`]+)`)/u.exec(clause.slice(start));
+  if (!quotedOperand && missingNameOperand(clause.slice(start))) return;
   const bare = allowBare && !quotedOperand ? /^[\p{L}\p{N}_./()-]{1,64}(?:\s+[\p{L}\p{N}_./()-]{1,64}){0,3}/u.exec(clause.slice(start))?.[0] : undefined;
   const operands = quotedOperand ? [{ value: quotedOperand.slice(1).find(value => value !== undefined)!, length: quotedOperand[0].length, quoted: true }]
     : bare ? Array.from({ length: bare.length }, (_, index) => ({ value: bare.slice(0, index + 1), length: index + 1, quoted: false })) : [];
@@ -312,12 +313,15 @@ function hasUnrepresentedCondition(residual: string, unboundMarkers: string[], p
 }
 
 export function analyzeQueryEvidence(text: string, literals: Literals, options: EvidenceOptions = {}) {
+  const literalCharacters = text.split("");
+  for (const fact of options.literalFacts ?? []) literalCharacters.fill(" ", fact.span[0], fact.span[1]);
+  const literalView = literalCharacters.join("");
   // Workflow topics own only their field nouns; independent predicates remain obligations.
-  const clean = withoutWorkflowTopics(queryScopeText(text), options.operation);
+  const clean = withoutWorkflowTopics(queryScopeText(literalView), options.operation);
   const filters: GroundedQueryFilter[] = [...(options.literalFacts ?? [])], unresolved: string[] = [], ambiguities: string[] = [];
   if (epistemicPredicate.test(clean)) ambiguities.push("ambiguous_scope");
   // A complete product owns its words before an adjacent field marker can claim them.
-  const nameText = stripAdProductMentions(mask(text));
+  const nameText = stripAdProductMentions(mask(literalView));
   const all = anchors.flatMap(([field_id, pattern]) => [...(field_id === "name" ? nameText : clean).matchAll(pattern)].map(found => ({ field_id, start: found.index, end: found.index + found[0].length, marker: found[0] })));
   const displayed = all.flatMap(item => {
     const display = /^(?:을|를|도)?\s*(?:(?:함께|같이)\s*)?(?:보여|표시|알려|출력)/u.exec(clean.slice(item.end));

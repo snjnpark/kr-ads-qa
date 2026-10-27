@@ -1,4 +1,5 @@
 const randomUUID = () => crypto.randomUUID();
+import type { RequestContinuation } from "../domain/query/query-clarification";
 import type { BrowserApplication as Application } from "./application";
 import type { Entity, Json } from "../domain/entities";
 import type { Scope } from "../contracts/domain";
@@ -25,6 +26,7 @@ export type QueryResponse = Json & {
 };
 export type QueryExecutionOptions = {
   onClarification?: (request: RequestSpec) => void;
+  continuation?: RequestContinuation;
 };
 type QueryApplication = Pick<Application,
   "accounts" | "settings" | "ai" | "ensureScope" | "policies" | "audit" |
@@ -47,7 +49,7 @@ export async function executeApplicationQuery(
   let effectiveScope: Scope;
   try {
     assertQueryInput(text);
-    const result = await application.ai.parseQuery(text, context, new Date(), application.settings.timezone);
+    const result = await application.ai.parseQuery(text, context, options.continuation ? new Date(options.continuation.request.input.reference_time) : new Date(), application.settings.timezone, options.continuation);
     interpretation = result.trace;
     request = structuredClone(result.request);
     request.input.scope = structuredClone(scope);
@@ -165,10 +167,9 @@ export async function executeApplicationQuery(
       effectiveScope,
     );
     let rows = response.rows;
-    if (workflow.history?.fields.includes("budget"))
-      rows = rows.filter((row) => row.field.startsWith("budget."));
-    if (workflow.history?.fields.includes("targeting"))
-      rows = rows.filter((row) => row.field.startsWith("targeting."));
+    const historyFields = workflow.history?.fields ?? [];
+    if (historyFields.length)
+      rows = rows.filter(row => historyFields.some(field => row.field.startsWith(`${field}.`)));
     if (workflow.history?.entity)
       rows = rows.filter((row) => row.entity_type === workflow.history!.entity);
     if (workflow.history?.increased_only)

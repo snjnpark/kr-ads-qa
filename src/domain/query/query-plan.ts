@@ -1,8 +1,10 @@
+import { verifySlotBinding } from "./query-clarification";
 import { Clarification, type Query, type QueryContext } from "./query";
 import { fieldPaths, queryPlanSchema, type QueryPlan } from "./query-contract";
 import type { ExecutionPlan, RequestSpec, RequestEvidence } from "./query-request";
 import { assertEntityCapabilities, descendantType } from "./query-scope";
 
+const evidenceRoles = ["filter", "logic", "target_declaration", "operation", "entity", "scope", "reference", "relation", "semantic", "workflow", "slot"];
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 function fail(message = "질문에 명시한 조건과 실행 계획이 일치하지 않습니다. 요청한 조건을 확인해 주세요."): never { throw new Clarification(message); }
 
@@ -21,7 +23,7 @@ export function validateRequestPlan(raw: unknown, request: RequestSpec, context?
   if (new Set(plan.platforms).size !== plan.platforms.length) fail("조회 범위와 이전 검색 결과를 확인해 주세요.");
   if (plan.previous !== (request.reference !== "all") || plan.children !== (request.reference === "children"))
     fail("이전 결과 참조가 질문과 일치하지 않습니다. 하위 대상 참조를 생략하거나 바꿀 수 없습니다.");
-  if (plan.previous && (!context?.has_results || context.platforms.length && plan.platforms.some(platform => !context.platforms.includes(platform))))
+  if (plan.previous && (!context?.has_results || !request.input.previous.has_results || context.platforms.length && plan.platforms.some(platform => !context.platforms.includes(platform))))
     fail("이전 결과의 매체와 다릅니다. 이전 검색 결과와 조회 범위를 확인해 주세요.");
   if (!same([...request.platforms].sort(), [...plan.platforms].sort()))
     fail("질문에 명시한 매체의 조회 범위와 계획이 일치하지 않습니다.");
@@ -49,9 +51,23 @@ export function validateRequestPlan(raw: unknown, request: RequestSpec, context?
   if (!selection.shapes.some(shape => shape.operation === plan.operation && shape.semantic === plan.semantic))
     fail(plan.semantic && !request.semantic && selection.source_complete ? "질문에 명시한 목적과 조회 계획이 일치하지 않습니다. 근거 없는 의미 조건을 추가할 수 없습니다." : "질문에 명시한 조건과 조회 방식이 일치하지 않습니다. 해석하지 못한 추가 조건을 확인해 주세요.");
   assertEntityCapabilities(plan.entity, plan.platforms, request.products);
-  const sources = new Map([["question", request.input.text], ...(request.sources ?? []).map(source => [source.id, source.text] as [string, string])]);
+  const extraSources = request.sources ?? [];
+  if (extraSources.some(source => source.id === "question") || new Set(extraSources.map(source => source.id)).size !== extraSources.length) fail("원문 근거의 출처 식별자가 중복되었습니다.");
+  if (request.continuation) {
+    const {slot} = request.continuation, binding = verifySlotBinding(request.input, request.continuation);
+    const slotFacts = request.evidence.filter(fact => fact.role === "slot");
+    const answerFacts = request.evidence.filter(fact => fact.source_id === "answer");
+    if (extraSources.length !== 1 || extraSources[0].id !== "answer" || extraSources[0].text !== binding.text ||
+        slotFacts.length !== 1 || slotFacts[0].source_id !== "question" || slotFacts[0].owner !== slot.owner || !same(slotFacts[0].span, slot.span) || slotFacts[0].text !== slot.text || !same(slotFacts[0].value, slot) ||
+        answerFacts.length !== 1 || answerFacts[0].role !== "filter" || answerFacts[0].owner !== slot.owner || !same(answerFacts[0].span, binding.span) || answerFacts[0].text !== binding.text || !same(answerFacts[0].value, binding.filter) ||
+        !request.conditions.some(condition => condition.evidence_id === answerFacts[0].id && same(condition.filter, binding.filter)) ||
+        request.date_expression !== binding.date_expression || slot.kind === "budget_criterion" && selection.currency !== binding.currency)
+      fail("보충 답변과 원래 요청 조건의 근거가 일치하지 않습니다.");
+  } else if (extraSources.length || request.date_expression || request.evidence.some(fact => fact.role === "slot")) fail("확인하지 않은 보충 조건을 추가할 수 없습니다.");
+  const sources = new Map([["question", request.input.text], ...extraSources.map(source => [source.id, source.text] as [string, string])]);
   const ids = new Set<string>();
   for (const fact of request.evidence) {
+    if (!evidenceRoles.includes(fact.role)) fail("지원하지 않는 요청 근거 역할입니다.");
     const source = sources.get(fact.source_id);
     if (ids.has(fact.id) || source === undefined || !Number.isInteger(fact.span[0]) || !Number.isInteger(fact.span[1]) || fact.span[0] < 0 || fact.span[1] > source.length || fact.span[0] >= fact.span[1] || source.slice(...fact.span) !== fact.text) fail("요청 조건의 원문 근거를 확인하지 못했습니다.");
     ids.add(fact.id);
@@ -66,12 +82,17 @@ export function validateRequestPlan(raw: unknown, request: RequestSpec, context?
   }
   const obligations = new Set<string>();
   for (const obligation of request.obligations) {
-    if (obligations.has(obligation.id) || obligation.basis === "explicit" && !obligation.evidence_ids.length || obligation.evidence_ids.some(id => !ids.has(id))) fail("요청 의무와 원문 근거가 일치하지 않습니다.");
+    if (!evidenceRoles.includes(obligation.kind)) fail("지원하지 않는 요청 의무입니다.");
+    if (obligation.basis === "default") {
+      const registered = !obligation.evidence_ids.length && (obligation.kind === "operation" && plan.operation === "find" && obligation.owner === null || obligation.kind === "logic" && plan.filters.length <= 1 && plan.logical_operator === "AND" && obligation.owner === plan.entity) && request.obligations.filter(item => item.kind === obligation.kind).length === 1;
+      if (!registered) fail("등록되지 않은 기본 처리 의무를 추가할 수 없습니다.");
+    } else if (!obligation.evidence_ids.length) fail("요청 의무의 근거가 누락되었습니다.");
+    if (obligations.has(obligation.id) || obligation.evidence_ids.some(id => !ids.has(id))) fail("요청 의무와 원문 근거가 일치하지 않습니다.");
     obligations.add(obligation.id);
     for (const id of obligation.evidence_ids) {
       const fact = request.evidence.find(item => item.id === id)!;
       if (fact.role !== obligation.kind || fact.owner !== obligation.owner) fail("조건의 소유 대상이 일치하지 않습니다.");
-      if (["filter", "logic", "target_declaration", "entity", "semantic"].includes(fact.role) && fact.owner !== null && fact.owner !== plan.entity) fail("다른 대상의 조건을 조회 대상에 적용할 수 없습니다.");
+      if (["filter", "logic", "target_declaration", "entity", "semantic", "slot"].includes(fact.role) && fact.owner !== null && fact.owner !== plan.entity) fail("다른 대상의 조건을 조회 대상에 적용할 수 없습니다.");
       if (fact.role === "filter" && !plan.filters.some(filter => same(filter, fact.value))) fail();
       if (fact.role === "workflow" && (!same(fact.value, request.workflow) || !["audit", "policy", "history", "create_rule"].includes(plan.operation))) fail("업무 옵션의 원문 근거가 일치하지 않습니다.");
       if (fact.role === "scope" && !same(fact.value, request.platforms)) fail("매체 범위의 원문 근거가 일치하지 않습니다.");
@@ -101,7 +122,7 @@ export function completeRequest(request: RequestSpec, raw: unknown, context?: Qu
     for (const obligation of completed.obligations) if (obligation.owner === null && ["filter", "logic", "target_declaration", "semantic"].includes(obligation.kind)) obligation.owner = plan.entity;
     add("entity", plan.entity, "model", plan.entity);
   }
-  if (!completed.operation) add("operation", plan.operation, "default");
+  if (!completed.operation && !completed.obligations.some(obligation => obligation.kind === "operation")) add("operation", plan.operation, "default");
   if (!completed.semantic && plan.semantic) add("semantic", plan.semantic, "model", plan.entity);
   for (const filter of plan.filters) if (!completed.conditions.some(condition => condition.filter.field === filter.field)) {
     const id = add("filter", filter, "model", plan.entity);
@@ -114,7 +135,7 @@ export function completeRequest(request: RequestSpec, raw: unknown, context?: Qu
 }
 
 const stepKind = (kind: RequestEvidence["role"]): ExecutionPlan["steps"][number]["kind"] =>
-  kind === "workflow" ? "workflow" : kind === "filter" || kind === "logic" ? "filter" : kind === "reference" ? "previous" : kind === "relation" ? "children" : kind === "semantic" ? "semantic" : kind === "operation" ? "result" : "scope";
+  kind === "workflow" ? "workflow" : kind === "filter" || kind === "logic" || kind === "slot" ? "filter" : kind === "reference" ? "previous" : kind === "relation" ? "children" : kind === "semantic" ? "semantic" : kind === "operation" ? "result" : "scope";
 export function compileExecutionPlan(request: RequestSpec, raw: unknown, context?: QueryContext): ExecutionPlan {
   const query = validateRequestPlan(raw, request, context);
   if (request.state !== "ready" || request.unresolved.length || request.ambiguities.length) fail("아직 해결하지 못한 요청 조건이 있습니다.");
@@ -126,7 +147,7 @@ export function compileExecutionPlan(request: RequestSpec, raw: unknown, context
   if (query.semantic) kinds.push("semantic");
   if (["audit", "policy", "history", "create_rule"].includes(query.operation)) kinds.push("workflow");
   kinds.push("result");
-  return {
+  const execution: ExecutionPlan = {
     workflow: structuredClone(request.workflow),
     query: { ...query, products: [...request.products] },
     steps: kinds.map(kind => ({ kind, obligation_ids: request.obligations.filter(obligation => {
@@ -135,6 +156,9 @@ export function compileExecutionPlan(request: RequestSpec, raw: unknown, context
     }).map(obligation => obligation.id) })),
     data_requirements: [...request.data_requirements],
   };
+  const assigned = execution.steps.flatMap(step => step.obligation_ids);
+  if (!same([...assigned].sort(), request.obligations.map(obligation => obligation.id).sort())) fail("실행 단계에 배정되지 않은 요청 의무가 있습니다.");
+  return execution;
 }
 
 export function validateExecutionPlan(plan: ExecutionPlan, request: RequestSpec, context?: QueryContext): ExecutionPlan {

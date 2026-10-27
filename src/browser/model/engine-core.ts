@@ -1,3 +1,4 @@
+import type { RequestContinuation } from "../../domain/query/query-clarification";
 import type { ChoiceQuestion } from "./types";
 import type { QueryContext } from "../../domain/query/query";
 import { interpretQuery } from "../../domain/query/query-model";
@@ -340,7 +341,7 @@ private decode(
       { status: uncertain ? "REVIEW" : "PASS", scores },
     );
   }
-async parseQuery(text: string, context?: QueryContext, now = new Date(), timezone = "Asia/Seoul") {
+async parseQuery(text: string, context?: QueryContext, now = new Date(), timezone = "Asia/Seoul", continuation?: RequestContinuation) {
     checkedText(text);
 
     return interpretQuery(text, context, now, timezone, async (state, questions) => {
@@ -349,7 +350,7 @@ async parseQuery(text: string, context?: QueryContext, now = new Date(), timezon
         const decision = this.decode(result, id, Object.keys(question.criteria));
         return [id, { label: decision.label, scores: decision.scores }];
       }));
-    }, () => this.modelVersion);
+    }, () => this.modelVersion, continuation);
   }
 async classify(text: string): Promise<Decision> {
     try {

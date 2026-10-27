@@ -55,6 +55,28 @@ export type SettingComparison = {
     { value: unknown; state: string; currency?: string | null }
   >;
 };
+export type QueryClarification = {
+  request_id: string;
+  slot_id: string;
+  kind: "budget_criterion" | "name_value" | "creation_period";
+  prompt: string;
+};
+export type AskRequest = Scope & {
+  text: string;
+  clarification?: Pick<QueryClarification, "request_id" | "slot_id">;
+};
+export type QueryEvidenceSummary = {
+  operation: "find" | "count" | "compare" | "audit" | "policy" | "history" | "create_rule";
+  entity: "campaign" | "adgroup" | "ad" | "creative" | "keyword" | "asset_group";
+  scope: Scope;
+  data_generation: string;
+  collected_at: string | null;
+  complete: boolean;
+  count: number;
+  unknown_count: number;
+  displayed_count: number;
+  steps: ("scope" | "previous" | "children" | "filter" | "semantic" | "workflow" | "result")[];
+};
 export type Result = {
   selected_policy?: { policy_id: string; name: string; version: number } | null;
   message: string;
@@ -72,4 +94,7 @@ export type Result = {
   run_id?: string;
   semantic_decisions?: Record<string, Record<string, unknown>>;
   intent?: Record<string, unknown>;
+  query_state?: "completed" | "needs_clarification" | "unsupported" | "error";
+  clarification?: QueryClarification;
+  evidence_result?: QueryEvidenceSummary;
 };

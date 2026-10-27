@@ -1,8 +1,11 @@
+import type { RequestSlotProof } from "./query-clarification";
 import type { Scope } from "../../contracts/domain";
 import type { QueryContext } from "./query";
 import type { QueryPlan } from "./query-contract";
 import type { QueryAnswerability } from "./query-answerability";
 import type { GroundedQueryFilter } from "./query-evidence";
+import { queryScopeText } from "../../lib/ad-products";
+import { requestPhraseLength } from "./query-language";
 import type { QueryClause } from "./query-clauses";
 
 export type QueryInput = {
@@ -20,7 +23,7 @@ export type QueryInput = {
 export type RequestEvidence = {
   id: string;
   source_id: string;
-  role: "filter" | "logic" | "target_declaration" | "operation" | "entity" | "scope" | "reference" | "relation" | "semantic" | "workflow";
+  role: "filter" | "logic" | "target_declaration" | "operation" | "entity" | "scope" | "reference" | "relation" | "semantic" | "workflow" | "slot";
   owner: QueryPlan["entity"] | null;
   span: [number, number];
   text: string;
@@ -60,6 +63,7 @@ export type RequestSpec = {
   selection?: RequestSelection;
   workflow?: RequestWorkflow;
   date_expression?: string;
+  continuation?: RequestSlotProof;
   state: "ready" | "needs_clarification" | "unsupported";
   entity: QueryPlan["entity"] | null;
   operation: QueryPlan["operation"] | null;
@@ -153,6 +157,17 @@ export function projectPreparedRequest(input: QueryInput, source: ProjectionSour
     })),
     ...(source.request.semantic ? [{ id: "semantic:request", source_id: "question", role: "semantic" as const, owner, span: [0, input.text.length] as [number, number], text: input.text, value: source.request.semantic }] : []),
   ];
+  if (!source.request.operation) {
+    let view = queryScopeText(input.text);
+    for (const {span:[start,end]} of evidence.filter(fact => fact.role !== "semantic")) view = view.slice(0,start) + " ".repeat(end-start) + view.slice(end);
+    for (let start=0; start<view.length; start++) {
+      if (start && !/[\s,.;?!:：]/u.test(view[start-1])) continue;
+      const length = requestPhraseLength(view.slice(start)) || /^(?:목록|리스트|명단)(?:을|를|이|은|는|인지)?(?=$|[\s,.?!;])/u.exec(view.slice(start))?.[0].length || 0;
+      if (!length) continue;
+      evidence.push({id:"operation:read", source_id:"question",role:"operation",owner:null,span:[start,start+length],text:input.text.slice(start,start+length),value:"find"});
+      break;
+    }
+  }
   return {
     input: structuredClone(input),
     state: source.request.status === "unsupported" ? "unsupported"
