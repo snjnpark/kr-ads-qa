@@ -5,6 +5,7 @@ import { queryLiteralScope, queryRequestRemainder, queryRequestEvidence, childEn
 import { analyzeQueryEvidence, queryPlanRemainder, type GroundedQueryFilter } from "./query-evidence";
 import { analyzeQueryAnswerability } from "./query-answerability";
 import type { QueryPlan, QueryTrace } from "./query-model";
+import { projectPreparedRequest, snapshotQueryInput } from "./query-request";
 
 const MONEY_UNITS: Record<string, number> = { 억: 100000000, 만: 10000, 천: 1000, 백: 100, 십: 10 };
 const DATE_LITERAL = /\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일|그제|어제|오늘|금일|지난\s?주|이번\s?주|이번\s?달|지난\s?달/gu;
@@ -258,7 +259,8 @@ export function preprocessQuery(text: string, context: QueryContext | undefined,
   if (clauses.length) trace.grounded.request_clauses = clauses;
   if (!modelFields.length && queryPlanRemainder(typed.residual, request.operation, request.semantic))
     throw new Clarification("해석하지 못한 추가 조건이 있습니다. 적용할 조건을 나누어 구체적으로 알려주세요.");
-  return { unquoted, numeric, typed, request, evidence, literalScope, scopeEntity, products, modelFields };
+  const spec = projectPreparedRequest(snapshotQueryInput(text, context, now, timezone), { typed, request, literalScope, scopeEntity, products, modelFields, clauses });
+  return { unquoted, numeric, typed, request, evidence, literalScope, scopeEntity, products, modelFields, spec };
 }
 export type PreparedQuery = ReturnType<typeof preprocessQuery>;
 
