@@ -1,7 +1,8 @@
 import { excludedAdProduct, performanceMetricText, precedingQuotedName, queryScopeText } from "../../lib/ad-products";
 import type { QueryContext } from "./query";
 import type { QueryPlan } from "./query-model";
-import { queryLiteralScope } from "./query-scope";
+import { queryLiteralScope, queryRequestRemainder } from "./query-scope";
+import { explicitReadRequest } from "./query-language";
 
 type Operation = QueryPlan["operation"];
 type Semantic = NonNullable<QueryPlan["semantic"]>;
@@ -28,7 +29,7 @@ const workflowHeads: [Operation, RegExp][] = [
   ["history", /이력|변경[^.;?!]*(?:내역|기록)|설정이?\s*바뀐\s*(?:내역|기록)/u],
   ["policy", /정책|가이드/u],
   ["audit", /검수|점검(?!표)|\bQA\b|(?:전체\s*)?설정(?:값)?(?:을|의|에\s*대한)?\s*검사/iu],
-  ["compare", /비교|설정[^.;?!]*(?:차이|대조)/u],
+  ["compare", /비교|설정[^.;?!]*(?:차이|대조)|(?:간|사이)(?:의)?\s*차이(?:점)?/u],
 ];
 const countRequest = /개수|수량|몇\s*(?:개|건)|(?:캠페인|광고(?:\s*(?:그룹|세트))?|애셋\s*그룹|에셋\s*그룹|소재|키워드|항목|대상|것)(?:들)?\s*(?:의\s*)?(?:총\s*)?수(?:를|는|가|부터|만|도|\s|[?.!]|$)|(?:수를|수는)\s*(?:세|알|확인|얼마)|(?<![\p{L}\p{N}_])(?:세어|세(?=\s*(?:줘|주세요|주십시오|주실래|줄래)))(?=$|\s|줘|주세요|주십시오|주실래|줄래)/u;
 
@@ -53,7 +54,13 @@ export function analyzeQueryAnswerability(text: string, evidence?: Evidence, con
   const coordinatedList = /(?:보여|알려|찾아|조회해)(?:\s*주)?(?:고|준\s*(?:뒤|후)|준\s*다음)[^.;?!]*(?:검수|점검|이력|정책|비교|규칙|룰)/u;
   const followingList = /(?:비교|검수|점검|이력|정책)[^.;?!]*(?:한\s*(?:후|뒤|다음)|하고|해\s*주고)[^.;?!]*(?:(?:목록|리스트)(?:도|을|를)?\s*(?:보여|알려|조회)|찾아)/u;
   const countedList = /(?:목록|리스트)(?:과|와|하고|\s*및)\s*(?:개수|수량)|(?:개수|수량)(?:과|와|하고|\s*및)\s*(?:목록|리스트)|(?:보여|찾아|조회해)(?:\s*주)?고[^.;?!]*(?:개수|수량|세어|세줘)|(?:세고|센\s*(?:뒤|후)|세어\s*주고)[^.;?!]*(?:목록|리스트)(?:도|을|를)?\s*(?:보여|알려|조회)/u;
-  if (operations.length && (coordinatedList.test(clean) || followingList.test(clean) || countedList.test(clean))) operations.push("find");
+  const clauses = workflowText.split(/[.;?!\n]+|(?<![\p{L}\p{N}_])그리고(?=$|\s)/u);
+  const independentList = clauses.length > 1 && clauses.some(clause => {
+    if (!/캠페인|광고|소재|키워드|애셋|에셋|목록|리스트/u.test(clause) || workflowHeads.some(([, pattern]) => pattern.test(clause)) || countRequest.test(clause)) return false;
+    try { return explicitReadRequest(queryRequestRemainder(clause)); }
+    catch { return false; } // The shared scope reader reports incompatible object obligations.
+  });
+  if (operations.length && (coordinatedList.test(clean) || followingList.test(clean) || countedList.test(clean) || independentList)) operations.push("find");
   const requested = [...new Set(operations)];
   if (requested.length > 1) add("multiple_operations", "목록·개수·비교·검수·정책·이력·규칙 작업을 하나씩 질문해 주세요.", "clarification");
   if ([...clean.matchAll(/비교|검수|점검|이력|정책|규칙|룰/gu)].some(match =>

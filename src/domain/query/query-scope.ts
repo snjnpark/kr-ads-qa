@@ -114,7 +114,6 @@ function literalScopeEvidence(text: string, contextEntity?: string) {
   const relationSpans: [number, number][] = [];
   if (entities.length > 1) {
     const descending = entities.every((e,i) => i === 0 || descendantType(entities[i-1], e));
-    const between = objectText.slice(matches[0].end, matches.at(-1)!.start);
     const bridges = matches.slice(1).map((mention, index) => ({ start: matches[index].end, end: mention.start,
       text: objectText.slice(matches[index].end, mention.start) }));
     const hierarchy = /^\s*(?:들\s*)?(?:(?:(?:검색|조회)\s*)?(?:결과|목록|리스트)\s*)?(?:(?:의|에|에서)\s*)?(?:(?:하위|아래|밑)(?:의|에서|에)?(?:\s*(?:속한|있는|연결된|등록된))?|속한)\s*/u;
@@ -123,7 +122,7 @@ function literalScopeEvidence(text: string, contextEntity?: string) {
       return condition && !hierarchy.test(bridge.text.slice(0, condition.index));
     }))
       throw new Clarification("상위 항목의 조건을 하위 항목의 조건으로 바꿀 수 없습니다. 상위 항목을 먼저 검색한 뒤 하위 항목을 조회해 주세요.");
-    if (!descending || /(?:^|\s)(?:와|과|및|하고|이나|또는|혹은|상위|부모)(?=$|\s)|,/u.test(between) ||
+    if (!descending || bridges.some(bridge => /(?:^|\s)(?:와|과|및|하고|이나|또는|혹은|상위|부모)(?=$|\s)|,/u.test(bridge.text.replace(/^\s*들/u, ""))) ||
         bridges.some(bridge => /[.;?!\n]/u.test(bridge.text)) ||
         bridges.some(bridge => /속한/u.test(bridge.text) && !hierarchy.test(bridge.text)))
       throw new Clarification("조회할 대상 종류를 하나만 지정해 주세요.");
@@ -157,10 +156,17 @@ function literalScopeEvidence(text: string, contextEntity?: string) {
     const start = match.index + match[0].length, role = childReferenceRole.exec(clean.slice(start)) ?? childPrefixRole.exec(clean.slice(start));
     const member = /^\s*(?:에\s*한해서|에\s*한해|안(?:에서|에\s*있는|의)|에\s*있는|에\s*속한)(?=$|\s)/u.exec(clean.slice(start));
     if (member) membershipSpans.push([start, start + member[0].length]);
-    if (contextEntity && entity === contextEntity && member && !/하위|아래|밑/u.test(member[0])) return [];
+    if (contextEntity && entity && member) {
+      if (entity === contextEntity) return [];
+      if (!descendantType(contextEntity, entity) || !/있는|속한/u.test(member[0]))
+        throw new Clarification("이전 결과와 다른 종류의 대상을 조회하려면 하위 관계를 명확히 지정해 주세요.");
+      return [[start, start + member[0].length] as [number, number]];
+    }
     return role ? [[start, start + role[0].length] as [number, number]] : [];
   });
   const reference = references.length ? (childSpans.length ? "children" as const : "previous" as const) : undefined;
+  if (reference === "children" && references.some(match => conditionMarker.test(clean.slice(0, match.index))))
+    throw new Clarification("이전 결과 앞의 조건은 상위 항목을 수식할 수 있습니다. 하위 관계를 먼저 지정한 뒤 하위 항목의 조건을 알려주세요.");
   const spans: [number, number][] = [...scopeSpans(mentions, clean), ...scopeSpans(objects, objectText), ...genericAdvertisingSpans, ...relationSpans, ...childSpans, ...membershipSpans, ...freshSearchSpans,
     ...referenceMentions.map(match => [match.index, match.index + match[0].length] as [number, number])];
   for (const mention of mentions) {
