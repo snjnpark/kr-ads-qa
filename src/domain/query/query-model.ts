@@ -7,6 +7,7 @@ import { ACTIVE, INACTIVE, Clarification, type Query, type QueryContext } from "
 import { literalListOperation, descendantType, assertEntityCapabilities } from "./query-scope";
 import type { analyzeQueryEvidence } from "./query-evidence";
 import { queryPlanRemainder } from "./query-evidence";
+import { explicitReadRequest } from "./query-language";
 import { analyzeQueryAnswerability, requestPlanMismatch, type QueryAnswerability } from "./query-answerability";
 import { preprocessQuery, namePredicateText, boundNameOperand, exactNameRequested, budgetCurrency, type PreparedQuery } from "./query-preparation";
 export { queryLiterals } from "./query-preparation";
@@ -235,7 +236,7 @@ export async function interpretQuery(text: string, context: QueryContext | undef
       throw new Clarification(disposition === "unsupported" ? "광고 설정 조회와 검수만 지원합니다. 확인할 설정을 질문해 주세요." : "확인할 항목과 조건의 기준을 구체적으로 알려주세요.");
     }
     trace.stage = "metadata";
-    const operation = request.operation ?? (completeEvidence ? "find" : undefined);
+    const operation = request.operation ?? (completeEvidence || explicitReadRequest(unquoted) ? "find" : undefined);
     if (operation) trace.grounded!.operation = operation;
     const metadata = await ask({
       ...(!scopeEntity ? { entity: choice("사용자가 조회하려는 광고 객체의 종류는 무엇인가요?", { campaign: "캠페인", adgroup: "광고그룹 또는 광고세트", ad: "광고", creative: "광고 소재", keyword: "검색 키워드", asset_group: "애셋그룹", ...unknown }) } : {}),

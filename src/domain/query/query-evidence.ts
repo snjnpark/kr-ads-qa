@@ -1,6 +1,7 @@
 import type { QueryPlan } from "./query-model";
 import { queryScopeText, stripAdProductMentions } from "../../lib/ad-products";
 import { ACTIVE, INACTIVE } from "./query";
+import { composedComparisonForms, requestPhraseLength, settingPrefixLength, settingPresenceForms } from "./query-language";
 
 type FieldId = "daily" | "lifetime" | "status" | "end" | "name" | "created" | "id";
 type Literals = { amounts: string[]; quotedStrings: string[]; dates?: unknown[] };
@@ -27,18 +28,17 @@ const presenceForms: ["is_empty" | "is_not_empty", RegExp][] = [
 ];
 const doubleNegation = /아닌|아니라|없지|않지|(?:없|비어|미설정|미입력)[가-힣\s]{0,16}(?:않|아니)|않[가-힣\s]{0,12}(?:않|아니)/u;
 function presenceMatch(clause: string, field?: FieldId) {
-  const initial = prefix.exec(clause)![0].length;
-  const start = initial + (field === "end" ? /^날짜(?:에는|이|가|은|는|을|를|에)?\s*/u.exec(clause.slice(initial))?.[0].length ?? 0 : 0);
+  const start = Math.max(prefix.exec(clause)![0].length, settingPrefixLength(clause, field === "end"));
   const withState = (length: number) => length + (/^\s*상태인/u.exec(clause.slice(length))?.[0].length ?? 0);
   const explicitNotEmpty = /^(?:없지(?:는)?|비어\s*있지(?:는)?)\s*않(?:은|는)/u.exec(clause.slice(start));
   if (explicitNotEmpty) return { operator: "is_not_empty" as const, length: withState(start + explicitNotEmpty[0].length) };
-  for (const [operator, pattern] of presenceForms) {
+  for (const [operator, pattern] of [...settingPresenceForms, ...presenceForms]) {
     const found = pattern.exec(clause.slice(start));
     if (!found) continue;
     const length = start + found[0].length;
     // 필드 바로 뒤의 술어를 감싼 명사구 부정만 반전한다. 다음 필드와 인용값은 호출부가 경계를 정한다.
     const inverse = /^\s*(?:인\s*)?(?:(?:것(?:이|은)|게|건|상태(?:가|는)|이|은)\s*)아닌/u.exec(clause.slice(length));
-    if (inverse && /것(?:이|은)|게|건/u.test(inverse[0]) && /^\s*것/u.test(clause.slice(length + inverse[0].length)) && !/^\s*인\s*건\s*아닌$/u.test(inverse[0])) return;
+    if (inverse && /것(?:이|은)|게|건/u.test(inverse[0]) && /^\s*것/u.test(clause.slice(length + inverse[0].length)) && !/^\s*(?:인\s*)?건\s*아닌$/u.test(inverse[0])) return;
     if (inverse) return { operator: operator === "is_empty" ? "is_not_empty" as const : "is_empty" as const, length: withState(length + inverse[0].length) };
     if (doubleNegation.test(clause)) return;
     return { operator, length: withState(length) };
@@ -63,11 +63,12 @@ const comparisons: [QueryPlan["filters"][number]["operator"], RegExp][] = [
 function comparisonMatch(clause: string) {
   const start = /^\s*/u.exec(clause)![0].length;
   const comparisonStart = start + /^(?:기준\s*(?=보다)|더\s*)?/u.exec(clause.slice(start))![0].length;
-  for (const [operator, pattern] of comparisons) {
+  for (const [operator, pattern] of [...composedComparisonForms, ...comparisons]) {
     const found = pattern.exec(clause.slice(comparisonStart));
     if (found) {
       const suffix = /^(?:\s*에\s*해당하는|(?:\s*(?:으로|로))?\s*(?:설정한|설정해\s*둔|제한해서|잡아\s*둔|잡은|잡힌|정한|지정한))?/u.exec(clause.slice(comparisonStart + found[0].length))![0];
-      return { operator, length: comparisonStart + found[0].length + suffix.length };
+      const nominal = /^\s*(?:금액|값)인(?=$|\s)/u.exec(clause.slice(comparisonStart + found[0].length + suffix.length))?.[0].length ?? 0;
+      return { operator, length: comparisonStart + found[0].length + suffix.length + nominal };
     }
   }
 }
@@ -243,14 +244,19 @@ function withoutWorkflowTopics(text: string, operation?: QueryPlan["operation"])
 
 // 알 수 없는 단어는 내부 글자를 지우지 않고 남은 입력 전체를 보존한다.
 export function carrierResidual(text: string, semantic?: QueryPlan["semantic"], operation?: QueryPlan["operation"]) {
-  let cursor = 0;
-  while (cursor < text.length) {
+  const reachable = new Set([0]);
+  let furthest = 0;
+  // Explore alternative closed units; a long local match must not hide a valid segmentation.
+  for (let cursor = 0; cursor < text.length; cursor++) {
+    if (!reachable.has(cursor)) continue;
     const lengths = [...carrierParts, ...(semantic ? semanticCarriers[semantic] : []), ...(operation ? workflowCarriers[operation] ?? [] : [])].map(pattern => pattern.exec(text.slice(cursor))?.[0].length ?? 0);
-    const consumed = Math.max(...lengths);
-    if (!consumed) return text.slice(cursor).trim();
-    cursor += consumed;
+    lengths.push(requestPhraseLength(text.slice(cursor)));
+    for (const consumed of lengths) if (consumed) {
+      const end = cursor + consumed;
+      reachable.add(end); furthest = Math.max(furthest, end);
+    }
   }
-  return "";
+  return text.slice(furthest).trim();
 }
 
 export function queryPlanRemainder(text: string, operation?: QueryPlan["operation"], semantic?: QueryPlan["semantic"]) {
@@ -271,7 +277,7 @@ export function queryCarrierOperation(text: string): "find" | "count" | undefine
   if (/찾|보여|알려|열람|조회|검색|목록|리스트|명단|나열|등록(?:되어|돼)\s*있|볼\s*수|확인|무엇인가요/u.test(text)) return "find";
 }
 
-const epistemicPredicate = /(?:없지(?:는)?\s*않을|비어\s*있지(?:는)?\s*않을|없을|있을|아닐)\s*수\s*도\s*(?:있|없)|것\s*같(?:지|은|아|다|습)|(?:건지|것인지)\s*(?:없는|있는)\s*(?:건지|것인지)/u;
+const epistemicPredicate = /(?:없지(?:는)?\s*않을|비어\s*있지(?:는)?\s*않을|않(?:았)?을|없(?:었)?을|있(?:었)?을|아닐)\s*(?:수\s*도\s*(?:있|없)|지도\s*모르)|것\s*같(?:지|은|아|다|습)|(?:건지|것인지)\s*(?:없는|있는)\s*(?:건지|것인지)/u;
 function hasUnrepresentedCondition(residual: string, unboundMarkers: string[], proof: { count: number; logic?: "AND" | "OR" }, semantic?: QueryPlan["semantic"]) {
   let clean = queryScopeText(residual);
   // The proved intent owns only its complete phrase; an extra setting after it remains an obligation.
@@ -445,7 +451,7 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
       const presence = presenceMatch(mask(clause), anchor.field_id);
       if (presence) { filter = { field, operator: presence.operator }; length = presence.length; }
       else if (anchor.field_id !== "end") {
-        const initial = prefix.exec(clause)![0].length;
+        const initial = Math.max(prefix.exec(clause)![0].length, settingPrefixLength(clause));
         const wrapper = /^(?:(?:으로\s*보면|로\s*보면|대조했을\s*때|비교하면|대조하면|확인하면)\s*)?/u.exec(clause.slice(initial))![0].length;
         const quantifier = /^(?:(?:정확히|정확하게|딱|최소|최대)\s*)?/u.exec(clause.slice(initial + wrapper))![0];
         const start = initial + wrapper + quantifier.length;
