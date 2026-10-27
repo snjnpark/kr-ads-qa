@@ -89,14 +89,39 @@ const selectedScopePattern = /(?<![\p{L}\p{N}_])(?:(?:현재|화면(?:에서|의
 export type QueryScopeRole = { kind: "entity" | "scope" | "reference" | "relation"; span: [number, number]; text: string; entity?: QueryPlan["entity"] };
 const hierarchy = /^\s*(?:들\s*)?(?:(?:(?:검색|조회)\s*)?(?:결과|목록|리스트)\s*)?(?:(?:의|에|에서)\s*)?(?:(?:하위|아래|밑)(?:의|에서|에)?(?:\s*(?:속한|있는|연결된|등록된))?|속한)\s*/u;
 
+function scopeRelationView(text: string, clean: string, mentions: ReturnType<typeof adVendorSpans>, productsFound: ReturnType<typeof adProductSpans>) {
+  const genericAdvertisingSpans: [number, number][] = [];
+  const objectText = stripAdProductMentions(clean, productsFound).replace(/광고의\s*(?=캠페인|광고\s*(?:그룹|세트|셋)|소재|키워드|(?:애셋|에셋)\s*그룹)/gu, (match, offset: number) => {
+    if (!mentions.some(vendor => !vendor.negative && vendor.end <= offset && /^\s*(?:의\s*)?$/u.test(clean.slice(vendor.end, offset)))) return match;
+    genericAdvertisingSpans.push([offset, offset + match.length]);
+    return " ".repeat(match.length);
+  });
+  // Owned scope words may occur inside a reference bridge; unknown words and conditions stay visible.
+  const relationCharacters = text.split("");
+  for (const [start, end] of genericAdvertisingSpans) relationCharacters.fill(" ", start, end);
+  for (const mention of mentions) {
+    relationCharacters.fill(" ", mention.start, mention.exclusion_end);
+    const carrier = (mention.negative ? complementCarrier : vendorCarrier).exec(text.slice(mention.exclusion_end));
+    if (carrier) relationCharacters.fill(" ", mention.exclusion_end, mention.exclusion_end + carrier[0].length);
+  }
+  for (const { start, end } of productsFound) {
+    relationCharacters.fill(" ", start, end);
+    const carrier = productCarrier.exec(text.slice(end));
+    if (carrier) relationCharacters.fill(" ", end, end + carrier[0].length);
+  }
+  const relationText = relationCharacters.join("");
+  return { objectText, genericAdvertisingSpans, relationText };
+}
+
 /** Closed object relations stay distinct from budget ranking even when another scope obligation needs clarification. */
 export function queryClosedHierarchyRoles(text: string): QueryScopeRole[] {
-  const clean = queryScopeText(text), objectText = stripAdProductMentions(clean, adProductSpans(text));
+  const clean = queryScopeText(text);
+  const { objectText, relationText } = scopeRelationView(text, clean, adVendorSpans(text), adProductSpans(text));
   const objects = entityScopeMentions(objectText).filter(mention => !mention.negative);
   return objects.slice(1).flatMap((child, index) => {
-    const parent = objects[index], bridge = clean.slice(parent.end, child.start), relation = hierarchy.exec(bridge);
+    const parent = objects[index], bridge = relationText.slice(parent.end, child.start), relation = hierarchy.exec(bridge);
     if (parent.name_field || child.name_field || !descendantType(parent.entity, child.entity) ||
-        !relation || relation[0].length !== bridge.length || /[.;?!\n]/u.test(bridge) || bridge !== text.slice(parent.end, child.start)) return [];
+        !relation || relation[0].length !== bridge.length || /[.;?!\n]/u.test(bridge) || clean.slice(parent.end, child.start) !== text.slice(parent.end, child.start)) return [];
     return [{ kind: "relation", span: [parent.end, child.start], text: text.slice(parent.end, child.start) }];
   });
 }
@@ -122,26 +147,7 @@ export function queryScopeEvidence(text: string, contextEntity?: string) {
   catch (error) { throw new Clarification((error as ProductScopeError).message); }
   const platforms = (requested.length ? requested : [...new Set(products.map(p => p.split(":")[0]))]) as QueryPlan["platforms"];
   const productsFound = adProductSpans(text);
-  const genericAdvertisingSpans: [number, number][] = [];
-  const objectText = stripAdProductMentions(clean, productsFound).replace(/광고의\s*(?=캠페인|광고\s*(?:그룹|세트|셋)|소재|키워드|(?:애셋|에셋)\s*그룹)/gu, (match, offset: number) => {
-    if (!mentions.some(vendor => !vendor.negative && vendor.end <= offset && /^\s*(?:의\s*)?$/u.test(clean.slice(vendor.end, offset)))) return match;
-    genericAdvertisingSpans.push([offset, offset + match.length]);
-    return " ".repeat(match.length);
-  });
-  // Owned scope words may occur inside a reference bridge; unknown words and conditions stay visible.
-  const relationCharacters = text.split("");
-  for (const [start, end] of genericAdvertisingSpans) relationCharacters.fill(" ", start, end);
-  for (const mention of mentions) {
-    relationCharacters.fill(" ", mention.start, mention.exclusion_end);
-    const carrier = (mention.negative ? complementCarrier : vendorCarrier).exec(text.slice(mention.exclusion_end));
-    if (carrier) relationCharacters.fill(" ", mention.exclusion_end, mention.exclusion_end + carrier[0].length);
-  }
-  for (const { start, end } of productsFound) {
-    relationCharacters.fill(" ", start, end);
-    const carrier = productCarrier.exec(text.slice(end));
-    if (carrier) relationCharacters.fill(" ", end, end + carrier[0].length);
-  }
-  const relationText = relationCharacters.join("");
+  const { objectText, genericAdvertisingSpans, relationText } = scopeRelationView(text, clean, mentions, productsFound);
   // Scope bridges may be skipped, but protected name text must never introduce a reference.
   const referenceMatches = (pattern: RegExp) => [...relationText.matchAll(pattern)].filter(match =>
     clean.slice(match.index, match.index + match[0].length) === text.slice(match.index, match.index + match[0].length));
