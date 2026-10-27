@@ -49,8 +49,8 @@ export function analyzeQueryAnswerability(text: string, evidence?: Evidence, con
     .replace(/(?:검수|점검|검사)(?=\s*정책)/gu, value => " ".repeat(value.length))
     .replace(/(?:검수|점검|검사|QA)(?=(?:하는|할|하도록|용)?\s*(?:새(?:로운)?\s*)?(?:규칙|룰))/giu, value => " ".repeat(value.length))
     .replace(/정책(?:을|를|에)?\s*(?:기준으로|따라|적용해)/gu, match => match.replace("정책", "  "))
-    .replace(/정책(?:의)?\s*(?:(?:적용|배정|연결)\s*(?:상태|내용|여부|내역)(?:을|를|은|는)?|(?:을|를))\s*(?:검수|점검)/gu,
-      match => match.replace(/검수|점검/gu, "  "));
+    .replace(/정책(?:의)?\s*(?:(?:적용|배정|연결)\s*(?:상태|내용|여부|내역)(?:을|를|은|는)?|(?:을|를))\s*(?:검수|점검|검사)/gu,
+      match => match.replace(/검수|점검|검사/gu, "  "));
   const operation_evidence = workflowHeads.flatMap(([operation, pattern]) => {
     const found = pattern.exec(workflowText);
     return found ? [{ operation, span: [found.index, found.index + found[0].length] as [number, number], text: text.slice(found.index, found.index + found[0].length) }] : [];
