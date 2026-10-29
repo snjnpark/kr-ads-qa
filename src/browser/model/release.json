@@ -6,28 +6,28 @@
     "files": {
       "lora.onnx": {
         "url": "/models/laya-lora-r4-colab-v1/lora.onnx",
-        "download_url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-lora-colab-v1/lora.onnx",
+        "download_url": "https://github.com/snjnpark/kr-ads-qa/releases/download/model-lora-colab-v1/lora.onnx",
         "sha256": "0829a214f2706f247556c687b44e17fae8fd454459f82abcd1e5ff9b1e9bdf8c",
         "size_bytes": 7618022,
         "source": "application"
       },
       "adapter-heads.bin": {
         "url": "/models/laya-lora-r4-colab-v1/adapter-heads.bin",
-        "download_url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-lora-colab-v1/adapter-heads.bin",
+        "download_url": "https://github.com/snjnpark/kr-ads-qa/releases/download/model-lora-colab-v1/adapter-heads.bin",
         "sha256": "ab9aedb396b4748890613fd4a4d9fc07488a530167c8a690d397a5561d02a955",
         "size_bytes": 60958720,
         "source": "application"
       },
       "condition-head.onnx": {
         "url": "/models/laya-lora-r4-colab-v1/condition-head.onnx",
-        "download_url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-lora-colab-v1/condition-head.onnx",
+        "download_url": "https://github.com/snjnpark/kr-ads-qa/releases/download/model-lora-colab-v1/condition-head.onnx",
         "sha256": "ae277e2fc52dcbdf4ef015a7b82161d3ca1d4ef03668ff5aef5532fde2e26732",
         "size_bytes": 21764276,
         "source": "application"
       },
       "laya_config.json": {
         "url": "/models/laya-lora-r4-colab-v1/laya_config.json",
-        "download_url": "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-lora-colab-v1/laya_config.json",
+        "download_url": "https://github.com/snjnpark/kr-ads-qa/releases/download/model-lora-colab-v1/laya_config.json",
         "sha256": "7c16e9215ddf49c4918dc2af178ca5bc751047f2e44586f8b4e55231dcb505b1",
         "size_bytes": 142,
         "source": "application"

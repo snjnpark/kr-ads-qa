@@ -24,7 +24,7 @@ export function BrowserModelTools() {
       <Button type="button" variant="outline" onClick={() => void command("/model/retry")}>다시 시도</Button>
     </div>
     <details className="mt-3"><summary>고급: 모델 파일 직접 가져오기</summary>
-      <p>자동 다운로드가 차단된 환경에서만 사용하세요. <a href="https://huggingface.co/convaiinnovations/laya/tree/7b928d828b7b0e022f929d9bd2e44165aa270148/multilingual" target="_blank" rel="noreferrer">원천 모델의 model.safetensors·토크나이저 2개</a>와 <a href="https://github.com/snjnpark/kr-ads-qa-models/releases/tag/model-lora-colab-v1" target="_blank" rel="noreferrer">추가 학습 파일 4개</a>를 함께 선택하세요. 버전과 무결성을 확인해 이 브라우저에 보관하며 서버로 업로드하지 않습니다.</p>
+      <p>자동 다운로드가 차단된 환경에서만 사용하세요. <a href="https://huggingface.co/convaiinnovations/laya/tree/7b928d828b7b0e022f929d9bd2e44165aa270148/multilingual" target="_blank" rel="noreferrer">원천 모델의 model.safetensors·토크나이저 2개</a>와 <a href="https://github.com/snjnpark/kr-ads-qa/releases/tag/model-lora-colab-v1" target="_blank" rel="noreferrer">추가 학습 파일 4개</a>를 함께 선택하세요. 버전과 무결성을 확인해 이 브라우저에 보관하며 서버로 업로드하지 않습니다.</p>
       <input aria-label="모델 파일 선택" type="file" multiple onChange={event => { const files = Array.from(event.target.files ?? []); if (files.length) void command("/model/import", { files }); event.target.value = ""; }} />
     </details>
     {message && <p role="status">{message}</p>}
