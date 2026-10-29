@@ -3,9 +3,8 @@ import type { Scope } from "../../contracts/domain";
 import type { QueryContext } from "./query";
 import type { QueryPlan } from "./query-contract";
 import type { QueryAnswerability } from "./query-answerability";
-import type { GroundedQueryFilter } from "./query-evidence";
+import { readQueryPhraseLength, type GroundedQueryFilter } from "./query-evidence";
 import { queryScopeText } from "../../lib/ad-products";
-import { requestPhraseLength } from "./query-language";
 import type { QueryClause } from "./query-clauses";
 
 export type QueryInput = {
@@ -162,7 +161,7 @@ export function projectPreparedRequest(input: QueryInput, source: ProjectionSour
     for (const {span:[start,end]} of evidence.filter(fact => fact.role !== "semantic")) view = view.slice(0,start) + " ".repeat(end-start) + view.slice(end);
     for (let start=0; start<view.length; start++) {
       if (start && !/[\s,.;?!:：]/u.test(view[start-1])) continue;
-      const length = requestPhraseLength(view.slice(start)) || /^(?:목록|리스트|명단)(?:을|를|이|은|는|인지)?(?=$|[\s,.?!;])/u.exec(view.slice(start))?.[0].length || 0;
+      const length = readQueryPhraseLength(view.slice(start)) || /^(?:목록|리스트|명단)(?:을|를|이|은|는|인지)?(?=$|[\s,.?!;])/u.exec(view.slice(start))?.[0].length || 0;
       if (!length) continue;
       evidence.push({id:"operation:read", source_id:"question",role:"operation",owner:null,span:[start,start+length],text:input.text.slice(start,start+length),value:"find"});
       break;
@@ -173,7 +172,7 @@ export function projectPreparedRequest(input: QueryInput, source: ProjectionSour
     state: source.request.status === "unsupported" ? "unsupported"
       : source.request.status === "clarification" || !source.typed.complete || !source.scopeEntity ? "needs_clarification" : "ready",
     entity: owner,
-    operation: source.request.operation ?? null,
+    operation: source.request.operation ?? (!source.request.operations.length && evidence.some(fact => fact.role === "operation" && fact.value === "find") ? "find" : null),
     platforms: [...(source.literalScope.platforms.length ? source.literalScope.platforms : source.literalScope.reference ? input.previous.platforms : [])],
     products: [...source.products],
     reference: source.literalScope.reference ?? "all",

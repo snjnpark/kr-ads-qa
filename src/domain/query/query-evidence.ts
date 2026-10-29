@@ -137,11 +137,20 @@ const logicPhrases: ["AND" | "OR", RegExp][] = [
   ["OR", new RegExp(`^(?:(?:어느\\s*)?한쪽\\s*조건만\\s*(?:충족|만족)해도\\s*(?:됩니다|돼요|돼)|조건\\s*중\\s*(?:하나를\\s*만족하는|하나라도\\s*(?:맞는|만족하는|충족하는))|한쪽에\\s*해당하는)${boundary}`, "u")],
   ["AND", new RegExp(`^(?:(?:(?:이라는|의)\\s*)?(?:다음\\s*)?(?:두|세)\\s*조건(?:을)?\\s*)?(?:(?:모두|전부)(?:를)?\\s*(?:만족|충족)하는|동시에\\s*충족하는|모두에\\s*해당하는)${boundary}`, "u")],
 ];
+const gapLogicForms: ["AND" | "OR", RegExp][] = [
+  ["OR", /또는|혹은|아니면|이거나|거나|든|\bOR\b/iu],
+  ["AND", /중|가운데|그리고|면서|이고|이며|(?:^|\s)고(?:\s|$)|및|동시에|\bAND\b/iu],
+];
+const readIntentCarriers = [
+  new RegExp(`^(?:찾고\\s*(?:있(?:습니다|어요|어)|싶(?:습니다|어요|어))|찾을래요?|찾습니다|찾겠습니다|보겠습니다|보겠어요|볼게요?|(?:보고|알고)\\s*싶(?:습니다|어요|어)|볼\\s*수\\s*있을까|궁금(?:합니다|해요|해)|있(?:나요|나)|(?:뭐가|무엇이)\\s*있(?:지|나요|습니까))${boundary}`, "u"),
+  new RegExp(`^(?:볼|알)\\s*수\\s*있(?:을까(?:요)?|나요)${boundary}`, "u"),
+  new RegExp(`^목록을\\s*받겠습니다${boundary}`, "u"),
+];
 const carrierParts = [
   new RegExp(`^(?:이번\\s*확인\\s*대상은|검토\\s*대상은|점검\\s*메모\\s*:)${boundary}`, "u"),
   new RegExp(`^(?:(?:을|를)\\s*)?(?:살펴보려\\s*해|찾는\\s*중이야|세되|대상으로)${boundary}`, "u"),
   new RegExp(`^(?:경우에\\s*한해서|경우만\\s*포함한|전체\\s*목록에\\s*올라\\s*있는|계정에\\s*연결된|현재\\s*조회할\\s*수\\s*있는|해당\\s*연결\\s*범위에서\\s*확인\\s*가능한)${boundary}`, "u"),
-  new RegExp(`^(?:것들입니다|입니다|수량을\\s*확인합니다|목록을\\s*받겠습니다|구분해서\\s*제시해\\s*주세요|서로)${boundary}`, "u"),
+  new RegExp(`^(?:것들입니다|입니다|수량을\\s*확인합니다|구분해서\\s*제시해\\s*주세요|서로)${boundary}`, "u"),
   new RegExp(`^(?:들의\\s*광고\\s*설정을|안에서|연동된\\s*모든\\s*매체에|연결\\s*범위에\\s*등록된|경우(?:만)?|검토\\s*대상은)${boundary}`, "u"),
   new RegExp(`^(?:는\\s*)?(?:총\\s*)?몇\\s*(?:개|건)(?:이야|인지|입니까)${boundary}`, "u"),
   new RegExp(`^(?:설정\\s*비교를\\s*요청합니다|사이\\s*설정이\\s*어떻게\\s*다른지|들\\s*사이\\s*차이점을\\s*제시해\\s*주세요|설정을\\s*나란히\\s*놓고|설정을\\s*서로\\s*대조한\\s*결과를|설정\\s*전체에\\s*대한|전반적으로|운영\\s*점검을\\s*위해)${boundary}`, "u"),
@@ -160,7 +169,6 @@ const carrierParts = [
   new RegExp(`^(?:(?:으로|로)\\s*)?범위를\\s*한정${requestEnding}${boundary}`, "u"),
   new RegExp(`^(?:연결한\\s*범위에\\s*속하는|처음부터\\s*다시\\s*전체\\s*범위에서\\s*확인할|그\\s*안에서|목록\\s*대신\\s*개수로)${boundary}`, "u"),
   new RegExp(`^(?:어떤\\s*것들이|어떻게)\\s*등록(?:되어|돼)\\s*있(?:나요|는지|어)${boundary}`, "u"),
-  new RegExp(`^(?:볼|알)\\s*수\\s*있(?:을까(?:요)?|나요)${boundary}`, "u"),
   new RegExp(`^(?:연결|올려)\\s*(?:해\\s*)?둔${boundary}`, "u"),
   new RegExp(`^(?:확인|조회|검색)(?:할\\s*건데|하려고\\s*(?:해|합니다))${boundary}`, "u"),
   new RegExp(`^(?:에\\s*)?어떤\\s*(?:운영\\s*)?정책이\\s*적용(?:되어|돼)\\s*있는지${boundary}`, "u"),
@@ -169,7 +177,8 @@ const carrierParts = [
   new RegExp(`^설정(?:이)?\\s*(?:바뀐\\s*기록|수정\\s*이력|괜찮은지)(?:을|은|이)?${boundary}`, "u"),
   new RegExp(`^(?:비교|검수|점검)(?:해서|하여)\\s*(?:확인|조회)${requestEnding}${boundary}`, "u"),
   new RegExp(`^(?:(?:운영|적용(?:한)?)\\s*정책|변경\\s*(?:이력|내역|기록))(?:을|를|은|는|의|부터)?${boundary}`, "u"),
-  new RegExp(`^(?:찾고\\s*(?:있(?:습니다|어요|어)|싶(?:습니다|어요|어))|찾을래요?|찾습니다|찾겠습니다|보겠습니다|보겠어요|볼게요?|(?:보고|알고)\\s*싶(?:습니다|어요|어)|볼\\s*수\\s*있을까|궁금(?:합니다|해요|해)|있(?:나요|나)|(?:뭐가|무엇이)\\s*있(?:지|나요|습니까)|바랍니다)${boundary}`, "u"),
+  ...readIntentCarriers,
+  new RegExp(`^바랍니다${boundary}`, "u"),
   /^(?:[\s,.;?!·:：]+)/u,
   new RegExp(`^(?:찾아|보여|알려|가져와|열람|실행|살펴(?:봐|보)?|표시|확인|검색|조회|나열|추려|골라|모아|세어|세(?=\\s*(?:줘|주세요|주실래요?|주십시오))|집계|비교|검수|점검|검사|제안|진행|열어)${requestEnding}${boundary}`, "iu"),
   new RegExp(`^(?:에\\s*대한\\s*(?:목록|리스트)|(?:조회|검색|확인)(?:를|을)|필요(?:합니다|해요|해))${boundary}`, "u"),
@@ -285,6 +294,17 @@ export function queryCarrierOperation(text: string): "find" | "count" | undefine
   if (/찾|보여|알려|열람|조회|검색|목록|리스트|명단|나열|등록(?:되어|돼)\s*있|볼\s*수|확인|무엇인가요/u.test(text)) return "find";
 }
 
+/** Read provenance uses the same closed carriers already accepted by interpretation. */
+export function readQueryPhraseLength(text: string): number {
+  const length = requestPhraseLength(text);
+  if (length) return length;
+  for (const pattern of readIntentCarriers) {
+    const phrase = pattern.exec(text)?.[0];
+    if (phrase) return phrase.length;
+  }
+  return 0;
+}
+
 const epistemicPredicate = /(?:없지(?:는)?\s*않을|비어\s*있지(?:는)?\s*않을|않(?:았)?을|없(?:었)?을|있(?:었)?을|아닐)\s*(?:수\s*도\s*(?:있|없)|지도\s*모르)|것\s*같(?:지|은|아|다|습)|(?:건지|것인지)\s*(?:없는|있는)\s*(?:건지|것인지)/u;
 function hasUnrepresentedCondition(residual: string, unboundMarkers: string[], proof: { count: number; logic?: "AND" | "OR" }, semantic?: QueryPlan["semantic"]) {
   let clean = queryScopeText(residual);
@@ -364,7 +384,7 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
   if (/(?:상태(?:가|는|를|:)|운영\s*상태)/u.test(statusEvidence) && !relevant_fields.includes("status")) { relevant_fields.push("status"); unresolved.push("status:unrecognized"); }
   for (const field of relevant_fields) if (fields.filter(item => item.field_id === field).length + filters.filter(item => item.field_id === field).length > 1) ambiguities.push(`${field}:multiple_predicates`);
   const sharedAnchors = new Set<number>();
-  let sharedConjunction = false;
+  const sharedConjunctions: { span: [number, number]; text: string }[] = [];
   const presenceField = (field: FieldId): QueryPlan["filters"][number]["field"] => field === "daily" ? "budget.daily" : field === "lifetime" ? "budget.lifetime" : "schedule.end";
   const supportsPresence = (field: FieldId) => ["daily", "lifetime", "end"].includes(field);
   for (let start = 0; start < fields.length - 1; start++) {
@@ -393,8 +413,12 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
       const field_id = fields[index].field_id;
       filters.push({ field_id, filter: { field: presenceField(field_id), operator: presence.operator }, span, text: text.slice(...span) });
       sharedAnchors.add(index);
+      if (index < end) {
+        const bridge = clean.slice(fields[index].end, fields[index + 1].start);
+        const start = fields[index].end + bridge.indexOf(bridge.trim());
+        sharedConjunctions.push({ span: [start, start + bridge.trim().length], text: text.slice(start, start + bridge.trim().length) });
+      }
     }
-    sharedConjunction = true;
   }
   for (const [index, anchor] of fields.entries()) {
     if (sharedAnchors.has(index) || ambiguities.includes(`${anchor.field_id}:multiple_predicates`)) continue;
@@ -562,12 +586,28 @@ export function analyzeQueryEvidence(text: string, literals: Literals, options: 
     if (owned) residual = quantified;
     else ambiguities.push("mixed_logic");
   }
-  const gaps = proofUnits.slice(1).map((item, index) => mask(text.slice(proofUnits[index].span[1], item.span[0])).replace(/[,.;:!?·]/gu, " "));
-  const hasOr = logic_evidence.some(item => item.logical_operator === "OR") || gaps.some(gap => /또는|혹은|아니면|이거나|거나|든|\bOR\b/iu.test(gap));
-  const hasAnd = logic_evidence.some(item => item.logical_operator === "AND") || sharedConjunction || gaps.some(gap => /중|가운데|그리고|면서|이고|이며|(?:^|\s)고(?:\s|$)|및|동시에|\bAND\b/iu.test(gap));
+  const gaps = proofUnits.slice(1).map((item, index) => {
+    const offset = proofUnits[index].span[1];
+    const gap = mask(text.slice(offset, item.span[0])).replace(/[,.;:!?·]/gu, " ");
+    return { offset, gap };
+  });
+  const hasOr = logic_evidence.some(item => item.logical_operator === "OR") || gaps.some(({gap}) => gapLogicForms[0][1].test(gap));
+  const hasAnd = logic_evidence.some(item => item.logical_operator === "AND") || sharedConjunctions.length > 0 || gaps.some(({gap}) => gapLogicForms[1][1].test(gap));
   if (filters.length > 1 && hasOr && hasAnd) ambiguities.push("mixed_logic");
   if (filters.length > 1 && /[()（）]/u.test(mask(residual))) ambiguities.push("nested_logic");
   const logical_operator = ambiguities.some(item => item === "mixed_logic" || item === "nested_logic") ? undefined : hasOr ? "OR" as const : "AND" as const;
+  if (!logic_evidence.length) {
+    const gapLogic = gaps.flatMap(({offset, gap}) => gapLogicForms.flatMap(([logical_operator, pattern]) =>
+      [...gap.matchAll(new RegExp(pattern.source, `${pattern.flags}g`))].flatMap(found => {
+        const phrase = found[0].trim(), start = found.index + found[0].indexOf(phrase), end = start + phrase.length;
+        if (start && !/\s/u.test(gap[start - 1]) || end < gap.length && !/\s/u.test(gap[end])) return [];
+        const span: [number, number] = [offset + start, offset + end];
+        return [{ logical_operator, span, text: text.slice(...span) }];
+      })));
+    logic_evidence.push(...[
+      ...sharedConjunctions.map(fact => ({ ...fact, logical_operator: "AND" as const })), ...gapLogic,
+    ].sort((left, right) => left.span[0] - right.span[0]));
+  }
   const remaining = carrierResidual(residual, options.semantic, options.operation);
   const background_carriers = [...queryScopeText(residual).matchAll(new RegExp(`(?<![^\\s,.;?!·:：])${workflowBackgroundPattern}`, "gu"))].map(found => ({
     span: [found.index, found.index + found[0].length] as [number, number], text: text.slice(found.index, found.index + found[0].length), reason: "workflow_background" as const,
