@@ -96,6 +96,10 @@ export async function interpretQuery(text: string, context: QueryContext | undef
     if (preparation.kind === "rejected") throw preparation.error;
     const prepared = preparation.prepared;
     const { unquoted, numeric, typed, request, evidence, literalScope, scopeEntity, modelFields } = prepared;
+    // An ungrounded numeric predicate has no authorized completion, even with a perfect chooser.
+    if (numeric.amounts.length && prepared.spec.selection!.filters.some(option =>
+      option.field.startsWith("budget.") && !option.alternatives.length))
+      throw new Clarification("예산의 비교 방향을 확인하지 못했습니다. 기준 금액과 초과·이상·미만·이하 조건을 구체적으로 알려주세요.");
     const simpleRead = !request.operation || ["find", "count"].includes(request.operation);
     const budgetPredicates = [...text.matchAll(/(일\s*예산|하루\s*예산|총\s*예산|전체\s*예산)(?:이|은|는|가)?\s*\+?\d[\d,]*(?:\.\d+)?\s*(이상|이하|초과|미만)(?:인)?/gu)];
     if (simpleRead && scopeEntity === "campaign" && !literalScope.reference && !numeric.quotedStrings.length && numeric.amounts.length === 1 && budgetPredicates.length === 1) {

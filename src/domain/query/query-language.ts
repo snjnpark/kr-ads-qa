@@ -37,6 +37,7 @@ export function settingPrefixLength(text: string, endField = false): number {
 }
 
 export const composedComparisonForms: ["eq" | "ne" | "gt" | "gte" | "lt" | "lte", RegExp][] = [
+  ["gt", /^(?:(?:을|를)\s*)?넘어서(?:서\s*(?:설정한|책정한)|\s*있는)(?=$|[\s,.;?!]|고|거나)/u],
   ["gte", /^(?:와|과)\s*같거나\s*(?:더\s*)?(?:큰|높은|많은)(?:\s*금액인)?/u],
   ["lte", /^(?:와|과)\s*같거나\s*(?:더\s*)?(?:작은|낮은|적은)(?:\s*금액인)?/u],
   ["ne", /^(?:(?:와|과)\s*)?일치하지\s*않(?:은|는)/u],

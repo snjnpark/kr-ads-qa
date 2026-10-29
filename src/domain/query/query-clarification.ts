@@ -43,10 +43,12 @@ const allowedMissingReasons = new Set(["missing_budget_criterion", "missing_name
 
 function slotDeclarations(text: string, hole: Hole): NonNullable<MissingSlot["declarations"]> {
   const subject = hole.kind === "budget_criterion" ? "(?:기준\\s*)?금액|예산\\s*기준" : hole.kind === "name_value" ? "(?:이름\\s*값|문구|문자열|단어)" : "(?:생성|등록)\\s*(?:기간|날짜)|기간";
-  const value = `(?:(?:어떤\\s*)?(?:${subject})|(?:필요한\\s*값|값|조건|확인할\\s*기준))`;
-  const time = "(?:이어서|다음에|나중에|추가로)";
-  const act = "(?:알려\\s*(?:줄게|드릴게|주겠습니다)|보충(?:할게|하겠습니다)|확정(?:할게|하겠습니다))";
-  const clause = `(?:(?:${time}\\s*)?${value}(?:인지는|은|는|을|를|이|가)?\\s*(?:${time}\\s*)?${act}|${value}(?:은|는)\\s*다음\\s*답에\\s*있어|아직\\s*${value}(?:이|가)\\s*완성되지\\s*않았어|(?:먼저\\s*)?확인\\s*질문(?:을)?\\s*(?:해\\s*줘|해주세요))`;
+  const value = `(?:(?:어떤\\s*)?(?:${subject})|(?:(?:필요한|빠진|누락된|확인할)\\s*)?(?:기준\\s*값|값|조건|기준))`;
+  const time = "(?:이어서|다음에|다음\\s*답변에서|나중에|추가로)";
+  const act = "(?:알려\\s*(?:줄게(?:요)?|드릴게(?:요)?|주겠습니다)|(?:보충|확정|전달|지정)(?:할게(?:요)?|하겠습니다)|답(?:할게(?:요)?|하겠습니다)|드리겠습니다)";
+  const request = "(?:먼저\\s*)?(?:확인\\s*질문|확인할\\s*(?:항목|기준))(?:을)?\\s*(?:먼저\\s*)?(?:해\\s*줘|해주세요|질문해\\s*(?:주세요|주십시오))";
+  const unfinished = `(?:아직\\s*)?${value}(?:이|가|은|는|을|를)?\\s*(?:아직\\s*)?(?:완성되지\\s*않았어|채우지\\s*못했습니다)`;
+  const clause = `(?:(?:${time}\\s*)?${value}(?:인지는|은|는|을|를|이|가)?\\s*(?:${time}\\s*)?${act}|${value}(?:은|는)\\s*다음\\s*답에\\s*있어|${unfinished}|${request})`;
   // A declaration must occupy an entire clause; unknown words and other predicates are never hidden.
   const pattern = new RegExp(`(?<![^.;?!\\n])\\s*${clause}(?=$|[.;?!\\n])`, "gu");
   const clean = unquotedAdText(text);
