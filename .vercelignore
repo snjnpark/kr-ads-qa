@@ -64,3 +64,7 @@ src/server/query-model.ts
 
 # Local-only policy export compatibility; public callers import canonical modules.
 src/domain/policies.ts
+
+# Preserved historical model manifests; current runtime uses browser/model/release.json.
+src/server/default-model.json
+src/browser/model/releases/conditions-qualifier-v1.json

@@ -6,7 +6,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 
-const candidate = "laya-lora-r4-colab-v1";
+const candidate = "kr-ads-qa";
 const downloadBase = "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-lora-colab-v1/";
 const upstreamBase = "https://huggingface.co/convaiinnovations/laya/resolve/7b928d828b7b0e022f929d9bd2e44165aa270148/multilingual/";
 const applicationFiles = ["lora.onnx", "adapter-heads.bin", "condition-head.onnx", "laya_config.json"];
