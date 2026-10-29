@@ -7,7 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 
 const candidate = "kr-ads-qa";
-const downloadBase = "https://github.com/snjnpark/kr-ads-qa-models/releases/download/model-lora-colab-v1/";
+const downloadBase = "https://github.com/snjnpark/kr-ads-qa/releases/download/model-lora-colab-v1/";
 const upstreamBase = "https://huggingface.co/convaiinnovations/laya/resolve/7b928d828b7b0e022f929d9bd2e44165aa270148/multilingual/";
 const applicationFiles = ["lora.onnx", "adapter-heads.bin", "condition-head.onnx", "laya_config.json"];
 const upstreamFiles = ["upstream.safetensors", "tokenizer/tokenizer.json", "tokenizer/tokenizer_config.json"];
