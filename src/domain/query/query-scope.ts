@@ -284,7 +284,7 @@ export function queryScopeEvidence(text: string, contextEntity?: string) {
     ...referenceClaims.map((claim): QueryScopeRole => ({ kind: "reference", ...claim, text: text.slice(...claim.span) })),
     ...[...relationSpans, ...childSpans].map((span): QueryScopeRole => ({ kind: "relation", span, text: text.slice(...span) })),
   ];
-  return { scope: { ...(entity ? { entity } : {}), platforms, ...(reference ? { reference } : {}) }, spans, targets,
+  return { scope: { ...(entity ? { entity } : {}), platforms, ...(reference ? { reference } : {}) }, products, spans, targets,
     roles: [...new Map(roles.map(role => [`${role.kind}:${role.span.join(":")}`, role])).values()],
     residual: declarations.text, clauses: declarations.clauses, ...(claimedEntities.length ? { reference_entity: claimedEntities[0] } : {}) };
 }

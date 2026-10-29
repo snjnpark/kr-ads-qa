@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { literalProducts, unquotedAdText, queryScopeText } from "../../lib/ad-products";
+import { unquotedAdText, queryScopeText } from "../../lib/ad-products";
 import { ACTIVE, INACTIVE, Clarification, dateRange, type QueryContext } from "./query";
 import { queryScopeEvidence, queryRequestEvidence, childEntity, assertEntityCapabilities } from "./query-scope";
 import { analyzeQueryEvidence, queryPlanRemainder, type GroundedQueryFilter } from "./query-evidence";
@@ -248,7 +248,7 @@ function planSelection(text: string, source: { typed: ReturnType<typeof queryEvi
 }
 
 // Both inference and direct-plan validation consume the same checked source facts.
-function readPreparedQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace>, capture: (value: ReturnType<typeof queryScopeEvidence>) => void, continued?: ContinuedInput) {
+function readPreparedQuery(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace>, capture: (value: ReturnType<typeof queryScopeEvidence>, entity: QueryPlan["entity"] | undefined) => void, continued?: ContinuedInput) {
   trace.outcome = "clarification";
   assertQueryInput(text);
   // Enforce the existing read-only configuration boundary before model interpretation; quoted names stay literal.
@@ -262,6 +262,8 @@ function readPreparedQuery(text: string, context: QueryContext | undefined, now:
   let scopeEvidence: ReturnType<typeof queryScopeEvidence> | undefined, scopeError: Clarification | undefined;
   try { scopeEvidence = queryScopeEvidence(text, context?.has_results ? context.entity : undefined); }
   catch (error) { if (!(error instanceof Clarification)) throw error; scopeError = error; }
+  const scopeEntity = scopeEvidence?.scope.entity ?? (scopeEvidence?.scope.reference && context?.has_results ? scopeEvidence.scope.reference === "children" ? childEntity(context.entity) : context.entity as QueryPlan["entity"] : undefined);
+  if (scopeEvidence) capture(scopeEvidence, scopeEntity);
   const initialRequest = analyzeQueryAnswerability(guardText, undefined, context, {reference:scopeEvidence?.scope.reference});
   trace.answerability = initialRequest;
   if (initialRequest.status === "unsupported") {
@@ -272,22 +274,28 @@ function readPreparedQuery(text: string, context: QueryContext | undefined, now:
   }
   if (!scopeEvidence) throw scopeError!;
   const literalScope = scopeEvidence.scope;
+  const products = scopeEvidence.products;
   trace.literal_scope = literalScope;
-  capture(scopeEvidence);
-  if (initialRequest.status === "clarification") throw new Clarification(initialRequest.reasons[0].message);
-  const numeric = queryLiterals(text, now, timezone);
-  const guardAmounts = proof ? queryLiterals(guardText, now, timezone).amounts : numeric.amounts;
-  if (proof?.slot.kind === "budget_criterion") numeric.amounts = [...new Set([...numeric.amounts, proof.binding.filter.value as string])];
-  if (proof?.slot.kind === "name_value") {
-    numeric.strings = [...new Set([...numeric.strings, proof.binding.filter.value as string])];
-    numeric.quotedStrings = [...new Set([...numeric.quotedStrings, proof.binding.filter.value as string])];
+  let numeric: ReturnType<typeof queryLiterals>, guardAmounts: string[], typed: ReturnType<typeof queryEvidence>;
+  try {
+    numeric = queryLiterals(text, now, timezone);
+    guardAmounts = proof ? queryLiterals(guardText, now, timezone).amounts : numeric.amounts;
+    if (proof?.slot.kind === "budget_criterion") numeric.amounts = [...new Set([...numeric.amounts, proof.binding.filter.value as string])];
+    if (proof?.slot.kind === "name_value") {
+      numeric.strings = [...new Set([...numeric.strings, proof.binding.filter.value as string])];
+      numeric.quotedStrings = [...new Set([...numeric.quotedStrings, proof.binding.filter.value as string])];
+    }
+    if (proof?.binding.date_expression) numeric.dates.push([proof.binding.date_expression, proof.binding.filter.value as [number, number]]);
+    assertLiteralPredicates(guardText);
+    if (numeric.dates.length && /등록(?:하지|되지)\s*않|등록\s*안/u.test(guardClean))
+      throw new Clarification("등록 날짜는 긍정 표현의 날짜 또는 기간으로 지정해 주세요.");
+    typed = queryEvidence(text, numeric, now, timezone, initialRequest, context?.has_results ? context.entity : undefined, proof, declarations);
+    trace.evidence = typed;
+  } catch (error) {
+    if (error instanceof Clarification && initialRequest.status === "clarification") throw new Clarification(initialRequest.reasons[0].message);
+    throw error;
   }
-  if (proof?.binding.date_expression) numeric.dates.push([proof.binding.date_expression, proof.binding.filter.value as [number, number]]);
-  assertLiteralPredicates(guardText);
-  if (numeric.dates.length && /등록(?:하지|되지)\s*않|등록\s*안/u.test(guardClean))
-    throw new Clarification("등록 날짜는 긍정 표현의 날짜 또는 기간으로 지정해 주세요.");
-  const typed = queryEvidence(text, numeric, now, timezone, initialRequest, context?.has_results ? context.entity : undefined, proof, declarations);
-  trace.evidence = typed;
+  if (initialRequest.status === "clarification") throw new Clarification(initialRequest.reasons[0].message);
   const request = withQueryEvidence(initialRequest, typed);
   trace.answerability = request;
   if (request.status === "unsupported" || request.status === "clarification") {
@@ -330,9 +338,7 @@ function readPreparedQuery(text: string, context: QueryContext | undefined, now:
       /(?:이름|명칭).*(?:특정\s*(?:단어|문구)|검색어|어떤\s*(?:단어|문구))/u.test(unquotedAdText(guardText)) && !numeric.quotedStrings.length ||
       /일예산인지.*(?:전체|총)\s*예산인지|예산\s*종류(?:가|는)?\s*다른|금액\s*단위는\s*빠졌/u.test(guardClean))
     throw new Clarification("비교할 값과 항목을 구체적으로 알려주세요.");
-  const scopeEntity = literalScope.entity ?? (literalScope.reference && context?.has_results ? literalScope.reference === "children" ? childEntity(context.entity) : context.entity as QueryPlan["entity"] : undefined);
   const scopedPlatforms = literalScope.platforms.length ? literalScope.platforms : literalScope.reference && context?.has_results ? context.platforms : [];
-  const products = literalProducts(text, scopedPlatforms);
   if (scopeEntity) assertEntityCapabilities(scopeEntity, scopedPlatforms, products);
   if (literalScope.reference === "children" && !scopeEntity) throw new Clarification("조회할 하위 대상 종류를 지정해 주세요.");
   if (literalScope.reference && context?.platforms.length && literalScope.platforms.some(platform => !context.platforms.includes(platform)))
@@ -370,20 +376,21 @@ export type RequestPreparation =
 /** Rejected requests retain their source and unresolved obligations; they never become executable plans. */
 export function prepareRequest(text: string, context: QueryContext | undefined, now: Date, timezone: string, trace: Partial<QueryTrace> = {}, continuation?: RequestContinuation): RequestPreparation {
   let scopeEvidence: ReturnType<typeof queryScopeEvidence> | undefined;
+  let scopeEntity: QueryPlan["entity"] | undefined;
   let continued: ContinuedInput | undefined;
   if (continuation) trace.outcome = "clarification";
   try {
     continued = continuation ? continuedInput(text, context, now, timezone, continuation) : undefined;
-    const prepared = readPreparedQuery(text, context, now, timezone, trace, value => { scopeEvidence = value; }, continued);
+    const prepared = readPreparedQuery(text, context, now, timezone, trace, (value, entity) => { scopeEvidence = value; scopeEntity = entity; }, continued);
     return { kind: "prepared", prepared, spec: prepared.spec };
   } catch (error) {
     if (!(error instanceof Clarification)) throw error;
-    const literalScope: PreparedQuery["literalScope"] = trace.literal_scope ?? { platforms: [] };
+    const literalScope: PreparedQuery["literalScope"] = scopeEvidence?.scope ?? trace.literal_scope ?? { platforms: [] };
     const request: QueryAnswerability = trace.answerability ?? { status: "clarification", reasons: [], operations: [], data_requirements: [] };
     const typed: ReturnType<typeof queryEvidence> = trace.evidence ?? { filters: [], relevant_fields: [], logical_operator: undefined, complete: false,
       unresolved: [], ambiguities: [], residual: text, logic_evidence: [], background_carriers: [] };
     const spec = projectPreparedRequest(continued?.input ?? snapshotQueryInput(text, context, now, timezone), {
-      typed, request, literalScope, scopeEntity: literalScope.entity, products: [], modelFields: [],
+      typed, request, literalScope, scopeEntity, products: scopeEvidence?.products ?? [], modelFields: [],
       clauses: scopeEvidence?.clauses ?? [], scope_roles: scopeEvidence?.roles,
     });
     spec.state = trace.outcome === "unsupported" ? "unsupported" : "needs_clarification";
