@@ -26,6 +26,7 @@ export type QueryResponse = Json & {
 };
 export type QueryExecutionOptions = {
   onClarification?: (request: RequestSpec) => void;
+  onValidatedScope?: (scope: Scope) => void;
   continuation?: RequestContinuation;
 };
 type QueryApplication = Pick<Application,
@@ -62,6 +63,8 @@ export async function executeApplicationQuery(
       throw new Clarification("조회 범위가 변경되었습니다. 현재 범위에서 먼저 검색해 주세요.");
     effectiveScope = resolveQueryScope(query, scope);
     query.platforms = (effectiveScope.platforms ?? []) as typeof query.platforms;
+    try { options.onValidatedScope?.(structuredClone(effectiveScope)); }
+    catch { /* Diagnostic observation must not change query execution. */ }
   } catch (error) {
     if (error instanceof QueryModelError && error.request && error.trace.outcome !== "inference")
       options.onClarification?.(error.request);

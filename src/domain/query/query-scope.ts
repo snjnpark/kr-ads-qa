@@ -159,12 +159,14 @@ export function queryScopeEvidence(text: string, contextEntity?: string) {
     const descending = entities.every((e,i) => i === 0 || descendantType(entities[i-1], e));
     const bridges = matches.slice(1).map((mention, index) => ({ start: matches[index].end, end: mention.start,
       text: relationText.slice(matches[index].end, mention.start) }));
-    if (matches.slice(0, -1).some(mention => mention.name_field) || bridges.some(bridge => {
+    if (matches.slice(0, -1).some(mention => mention.name_field) || bridges.some((bridge, index) => {
+      // Repeating the child noun does not turn its condition into a parent condition.
+      if (matches[index].entity === matches[index + 1].entity) return false;
       const condition = conditionMarker.exec(bridge.text);
       return condition && !hierarchy.test(bridge.text.slice(0, condition.index));
     }))
       throw new Clarification("상위 항목의 조건을 하위 항목의 조건으로 바꿀 수 없습니다. 상위 항목을 먼저 검색한 뒤 하위 항목을 조회해 주세요.");
-    if (!descending || bridges.some(bridge => /(?:^|\s)(?:와|과|및|하고|이나|또는|혹은|상위|부모)(?=$|\s)|,/u.test(bridge.text.replace(/^\s*들/u, ""))) ||
+    if (!descending || bridges.some(bridge => /(?:^|\s)(?:와|과|및|하고|이나|또는|혹은|상위|부모)(?=$|\s)|,/u.test(bridge.text.replace(/^\s*들/u, "").replace(/(?<![\d,])\d{1,3}(?:,\d{3})+(?![\d,])/gu, value => value.replaceAll(",", "")))) ||
         bridges.some(bridge => /[.;?!\n]/u.test(bridge.text)) ||
         bridges.some(bridge => /속한/u.test(bridge.text) && !hierarchy.test(bridge.text)))
       throw new Clarification("조회할 대상 종류를 하나만 지정해 주세요.");
@@ -270,7 +272,7 @@ export function queryScopeEvidence(text: string, contextEntity?: string) {
   if (declarations.clauses.some(clause => targets.filter(target => target.start >= clause.span[0] && target.end <= clause.span[1]).at(-1)!.entity !== entity))
     throw new Clarification("선언한 조회 대상과 실제 조회 대상이 다릅니다. 대상 종류를 하나로 지정해 주세요.");
   const prefixRemainder = (end: number) => carrierResidual(declarations.text.slice(0, end));
-  if (entities.length > 1 && matches.slice(0, -1).some(parent => prefixRemainder(parent.start)))
+  if (entities.length > 1 && matches.slice(0, -1).some(parent => parent.entity !== entity && prefixRemainder(parent.start)))
     throw new Clarification("상위 항목의 조건을 하위 항목의 조건으로 바꿀 수 없습니다. 상위 항목을 먼저 검색한 뒤 하위 항목을 조회해 주세요.");
   for (const account of objectText.matchAll(/(?<![\p{L}\p{N}_])(?:광고\s*)?계정(?=$|\s|의|에|명)/gu)) {
     if ((!matches.length || account.index < matches[0].start) && prefixRemainder(account.index))
